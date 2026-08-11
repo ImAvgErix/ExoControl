@@ -2,7 +2,7 @@
 
 > **Exo Control — realtime PC eyes and hands for any AI agent. Compact. Leased. Honest.**
 
-**Announce-GA cleared 2026-08-11** for v0.1. Capability bar: [Jarvis OS](docs/JARVIS-OS.md) (stamped). Prefer import exo_control; ether.* remains stable per [API-STABILITY.md](docs/API-STABILITY.md). P1 trails are not claimed.
+**Announce-GA cleared 2026-08-11** for v0.1. Capability bar: [Jarvis OS](docs/JARVIS-OS.md) (stamped). Prefer import `exo_control`; `aether.*` remains stable per [API-STABILITY.md](docs/API-STABILITY.md). P1 trails are not claimed.
 
 Realtime desktop (UIA) + browser (DOM/CDP) + files + registry + OS infrastructure for **any** AI harness — Cursor, Claude Desktop, Codex, custom agents, scripts. Compact refs by default, batched exec, screenshots only on ask or structure miss.
 
@@ -28,7 +28,7 @@ pip install -e .
 playwright install chromium
 ```
 
-Import path is still `aether.*` during the rename (do not invent an `exo_control` Python API yet). CLI entry points: `exo-control` and `aether`.
+Preferred import: `exo_control` (re-exports). `aether.*` stays stable for v0.1 — see [docs/API-STABILITY.md](docs/API-STABILITY.md). CLI: `exo-control` (and compat `aether`).
 
 ## Cursor (MCP)
 
@@ -39,13 +39,13 @@ Add to your Cursor MCP config (`mcp.json` or Cursor Settings → MCP):
   "mcpServers": {
     "exo-control": {
       "command": "python",
-      "args": ["-m", "aether.slim_mcp_server"]
+      "args": ["-m", "exo_control.slim_mcp_server"]
     }
   }
 }
 ```
 
-Use a venv/`python` that has this package installed. Prefer one batched `aether_exec` script over chatty single clicks.
+Use a venv/`python` that has this package installed. MCP module: `exo_control.slim_mcp_server` (compat: `aether.slim_mcp_server`). Prefer one batched `aether_exec` script over chatty single clicks.
 
 ## Claude Desktop (MCP)
 
@@ -56,7 +56,7 @@ Same server in Claude Desktop config (`claude_desktop_config.json`):
   "mcpServers": {
     "exo-control": {
       "command": "python",
-      "args": ["-m", "aether.slim_mcp_server"]
+      "args": ["-m", "exo_control.slim_mcp_server"]
     }
   }
 }
@@ -79,7 +79,7 @@ Equivalent: `python -m aether.cli …`.
 ## Python
 
 ```python
-from aether.exec_engine import AetherExecEngine
+from exo_control.exec_engine import AetherExecEngine
 
 eng = AetherExecEngine()
 eng.execute([
@@ -100,7 +100,7 @@ eng.execute([
 
 ## Status
 
-Bootstrap from former local aether-driver (v1.8 lineage). Package name `exo-control`; modules still `aether.*` until rename completes. **Alpha** until Jarvis OS is stamped.
+**Announce-GA cleared 2026-08-11** for v0.1. Jarvis OS stamped. Package `exo-control` with dual `exo_control` / `aether.*` imports. P1 trails optional and unclaimed.
 
 ## License
 
