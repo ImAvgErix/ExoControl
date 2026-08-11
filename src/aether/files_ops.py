@@ -180,12 +180,20 @@ def files_write(
 
 
 def files_copy(
-    src: str,
-    dst: str,
+    src: str = "",
+    dst: str = "",
     *,
+    path: str = "",
+    dest: str = "",
+    source: str = "",
+    destination: str = "",
     confirm: bool = False,
     roots: Optional[Sequence[Path]] = None,
 ) -> Dict[str, Any]:
+    src = src or source or path or ""
+    dst = dst or dest or destination or ""
+    if not src or not dst:
+        return {"ok": False, "error": "files_copy requires src/dst (aliases: from/to, path/dest, source/destination)"}
     ok_s, src_r, out_s = _resolve_under_roots(src, roots)
     ok_d, dst_r, out_d = _resolve_under_roots(dst, roots)
     if not ok_s:
@@ -206,12 +214,20 @@ def files_copy(
 
 
 def files_move(
-    src: str,
-    dst: str,
+    src: str = "",
+    dst: str = "",
     *,
+    path: str = "",
+    dest: str = "",
+    source: str = "",
+    destination: str = "",
     confirm: bool = False,
     roots: Optional[Sequence[Path]] = None,
 ) -> Dict[str, Any]:
+    src = src or source or path or ""
+    dst = dst or dest or destination or ""
+    if not src or not dst:
+        return {"ok": False, "error": "files_move requires src/dst (aliases: from/to, path/dest, source/destination)"}
     ok_s, src_r, out_s = _resolve_under_roots(src, roots)
     ok_d, dst_r, out_d = _resolve_under_roots(dst, roots)
     if not ok_s:

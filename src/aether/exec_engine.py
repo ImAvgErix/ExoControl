@@ -1033,14 +1033,14 @@ class AetherExecEngine:
             )
         if op == "files_copy":
             return files_ops.files_copy(
-                src=str(step.get("src") or step.get("from") or step.get("path") or ""),
-                dst=str(step.get("dst") or step.get("to") or step.get("dest") or ""),
+                src=str(step.get("src") or step.get("from") or step.get("source") or step.get("path") or ""),
+                dst=str(step.get("dst") or step.get("to") or step.get("dest") or step.get("destination") or ""),
                 confirm=bool(step.get("confirm", False)),
             )
         if op == "files_move":
             return files_ops.files_move(
-                src=str(step.get("src") or step.get("from") or step.get("path") or ""),
-                dst=str(step.get("dst") or step.get("to") or step.get("dest") or ""),
+                src=str(step.get("src") or step.get("from") or step.get("source") or step.get("path") or ""),
+                dst=str(step.get("dst") or step.get("to") or step.get("dest") or step.get("destination") or ""),
                 confirm=bool(step.get("confirm", False)),
             )
         if op == "files_delete":

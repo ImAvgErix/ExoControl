@@ -111,22 +111,45 @@ def service_list(max_items: int = 80) -> Dict[str, Any]:
         completed = _run(["sc", "query", "state=", "all"], timeout=20)
         services: List[Dict[str, Any]] = []
         name = None
-        state = None
         for line in (completed.stdout or "").splitlines():
             line = line.strip()
-            if line.upper().startswith("SERVICE_NAME"):
+            if not line:
+                continue
+            upper = line.upper()
+            # sc pads keys: "STATE              : 4  RUNNING"
+            if upper.startswith("SERVICE_NAME") and ":" in line:
                 name = line.split(":", 1)[1].strip()
-            elif line.upper().startswith("STATE"):
-                # STATE: 4 RUNNING
+            elif upper.startswith("STATE") and ":" in line and name:
                 parts = line.split(":", 1)[1].strip().split()
                 state = parts[-1] if parts else ""
-                if name:
-                    services.append({"name": name, "state": state})
-                    name = None
-                    state = None
-                    if len(services) >= max_items:
-                        break
-        return {"ok": True, "services": services, "count": len(services), "capped": len(services) >= max_items}
+                services.append({"name": name, "state": state})
+                name = None
+                if len(services) >= max_items:
+                    break
+        if not services:
+            # Fallback when sc output locale/format differs
+            ps = _run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"Get-Service | Select-Object -First {int(max_items)} Name,Status | ConvertTo-Csv -NoTypeInformation",
+                ],
+                timeout=25,
+            )
+            import csv
+            import io
+            for row in csv.DictReader(io.StringIO(ps.stdout or "")):
+                n = (row.get("Name") or "").strip()
+                st = (row.get("Status") or "").strip()
+                if n:
+                    services.append({"name": n, "state": st})
+        return {
+            "ok": True,
+            "services": services,
+            "count": len(services),
+            "capped": len(services) >= max_items,
+        }
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
