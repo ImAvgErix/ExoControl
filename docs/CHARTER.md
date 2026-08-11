@@ -64,7 +64,7 @@ Ship against **`docs/JARVIS-OS.md`**: Floor (Jarvis + Plus P0) + Jarvis OS P0 (e
 - [x] Repo `ImAvgErix/ExoControl` with this charter + SECURITY.md + JARVIS-OS.md
 - [x] MCP + CLI + Python SDK install paths documented
 - [ ] aether-driver extracted/rebranded; no broken ExoLauncher dependency for core ops
-- [ ] Jarvis OS Floor + P0 [x] (Product stamp)
+- [x] Jarvis OS Floor + P0 [x] (Product stamp)
 - [ ] Hard stops tested (confirm gates, anti-cheat deny, compact caps)
 - [x] `exo-control` CLI entry point wired in packaging (alongside or replacing legacy `aether`)
 

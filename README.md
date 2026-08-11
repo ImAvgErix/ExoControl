@@ -2,7 +2,7 @@
 
 > **Exo Control — realtime PC eyes and hands for any AI agent. Compact. Leased. Honest.**
 
-**Alpha** until Product stamps **Jarvis OS** ([docs/JARVIS-OS.md](docs/JARVIS-OS.md)). Expect breaking changes during extract/rename.
+**Jarvis OS stamped 2026-08-11** ([docs/JARVIS-OS.md](docs/JARVIS-OS.md)). Capability bar cleared. Announce-GA still needs package rename + hard-stop test proof (see [docs/CHARTER.md](docs/CHARTER.md)); expect breaking changes during rename.
 
 Realtime desktop (UIA) + browser (DOM/CDP) + files + registry + OS infrastructure for **any** AI harness — Cursor, Claude Desktop, Codex, custom agents, scripts. Compact refs by default, batched exec, screenshots only on ask or structure miss.
 
