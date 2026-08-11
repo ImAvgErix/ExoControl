@@ -138,6 +138,7 @@ def test_mutating_ops_require_lease(lease_home):
 
 def test_readonly_ops_no_lease(lease_home, monkeypatch):
     eng = AetherExecEngine(controller=JarvisStub())
+    monkeypatch.setenv("AETHER_FILE_ROOTS", str(lease_home))
     monkeypatch.setattr(
         "aether.exo_bridge.discover_cdp_endpoints",
         lambda extra_ports=None: [{"port": 9229, "endpoint": "http://127.0.0.1:9229", "browser": "stub", "targets": []}],
@@ -250,6 +251,7 @@ def test_launch_op_uses_popen(lease_home, monkeypatch):
 
 
 def test_apps_and_files_list(lease_home, monkeypatch):
+    monkeypatch.setenv("AETHER_FILE_ROOTS", str(lease_home))
     monkeypatch.setattr(
         "aether.exec_engine._list_apps",
         lambda max_items=80: {"ok": True, "apps": [{"pid": 1, "title": "Demo", "exe": r"C:\Demo.exe", "hwnd": 9}], "count": 1},

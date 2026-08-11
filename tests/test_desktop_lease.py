@@ -155,7 +155,7 @@ def test_notify_stub_and_files_list(lease_dirs, tmp_path):
     d = tmp_path / "files"
     d.mkdir()
     (d / "a.txt").write_text("x", encoding="utf-8")
-    listed = eng.execute([{"op": "files_list", "path": str(d)}])
+    listed = eng.execute([{"op": "files_list", "path": str(d), "confirm": True}])
     assert listed["ok"] is True
     names = [e["name"] for e in listed["steps"][0]["result"]["entries"]]
     assert "a.txt" in names

@@ -1,5 +1,5 @@
-"""Aether Driver v1.8.0 — Jarvis live-in-PC control via slim MCP + exec ops + desktop lease + 1.7 safety rails."""
-__version__ = "1.8.0"
+"""Exo Control v0.1.0 — Jarvis OS CODE (compact eyes, files/registry/infra, CDP page-pick) via MCP + CLI + Python."""
+__version__ = "0.1.0"
 from .perception import PerceptionEngine
 from .action import ActionEngine
 from .smart import SmartController, Target, ActionOutcome
