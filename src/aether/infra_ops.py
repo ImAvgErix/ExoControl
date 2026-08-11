@@ -114,9 +114,9 @@ def service_list(max_items: int = 80) -> Dict[str, Any]:
         state = None
         for line in (completed.stdout or "").splitlines():
             line = line.strip()
-            if line.upper().startswith("SERVICE_NAME:"):
+            if line.upper().startswith("SERVICE_NAME"):
                 name = line.split(":", 1)[1].strip()
-            elif line.upper().startswith("STATE:"):
+            elif line.upper().startswith("STATE"):
                 # STATE: 4 RUNNING
                 parts = line.split(":", 1)[1].strip().split()
                 state = parts[-1] if parts else ""
@@ -146,7 +146,7 @@ def service_status(name: str) -> Dict[str, Any]:
             return {"ok": False, "error": msg[:400], "name": name}
         state = ""
         for line in out.splitlines():
-            if line.strip().upper().startswith("STATE:"):
+            if line.strip().upper().startswith("STATE"):
                 parts = line.split(":", 1)[1].strip().split()
                 state = parts[-1] if parts else ""
         return {"ok": True, "name": name, "state": state, "raw": out[:500]}
