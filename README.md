@@ -28,11 +28,11 @@ pip install -e .
 playwright install chromium
 ```
 
-Import path is still ether.* during the rename (do not invent an xo_control Python API yet). CLI entry points: xo-control and ether.
+Import path is still `aether.*` during the rename (do not invent an `exo_control` Python API yet). CLI entry points: `exo-control` and `aether`.
 
 ## Cursor (MCP)
 
-Add to your Cursor MCP config (mcp.json or Cursor Settings → MCP):
+Add to your Cursor MCP config (`mcp.json` or Cursor Settings → MCP):
 
 ```json
 {
@@ -45,11 +45,11 @@ Add to your Cursor MCP config (mcp.json or Cursor Settings → MCP):
 }
 ```
 
-Use a venv/python that has this package installed. Prefer one batched ether_exec script over chatty single clicks.
+Use a venv/`python` that has this package installed. Prefer one batched `aether_exec` script over chatty single clicks.
 
 ## Claude Desktop (MCP)
 
-Same server in Claude Desktop config (claude_desktop_config.json):
+Same server in Claude Desktop config (`claude_desktop_config.json`):
 
 ```json
 {
@@ -62,7 +62,7 @@ Same server in Claude Desktop config (claude_desktop_config.json):
 }
 ```
 
-Restart Claude Desktop after editing. Point command at the interpreter that has the package installed if python is ambiguous.
+Restart Claude Desktop after editing. Point `command` at the interpreter that has the package installed if `python` is ambiguous.
 
 ## CLI
 
@@ -74,7 +74,7 @@ aether lease status
 aether script steps.json
 ```
 
-Equivalent: python -m aether.cli ….
+Equivalent: `python -m aether.cli …`.
 
 ## Python
 
@@ -94,13 +94,13 @@ eng.execute([
 ## Safety
 
 - Desktop lease: one agent holds the hands at a time
-- Destructive / kill / registry write / service mutate require confirm=true
+- Destructive / kill / registry write / service mutate require `confirm=true`
 - Hard denies: anti-cheat tampering, credential dumping, silent elevation
 - Details: [SECURITY.md](SECURITY.md)
 
 ## Status
 
-Bootstrap from former local aether-driver (v1.8 lineage). Package name xo-control; modules still ether.* until rename completes. **Alpha** until Jarvis OS is stamped.
+Bootstrap from former local aether-driver (v1.8 lineage). Package name `exo-control`; modules still `aether.*` until rename completes. **Alpha** until Jarvis OS is stamped.
 
 ## License
 
