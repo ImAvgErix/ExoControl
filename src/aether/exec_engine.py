@@ -1,0 +1,1362 @@
+"""Compact, script-first execution surface for Aether.
+
+The full Aether MCP remains useful for interactive discovery.  This module is
+the low-token surface: an agent sends one declarative JSON script, Aether keeps
+its controller/cache alive, and every step returns compact verification data.
+"""
+from __future__ import annotations
+
+import base64
+from pathlib import Path
+import io
+import json
+import time
+from collections.abc import Mapping, Sequence
+from typing import Any, Dict, List, Optional
+
+from aether.smart import SmartController
+from aether import desktop_lease
+
+
+MAX_STEPS = 64
+MAX_WAIT_SECONDS = 60.0
+
+# Ops that may mutate the desktop / browser and therefore need a desktop lease.
+LEASE_REQUIRED_OPS = frozenset({
+    "click", "smart_click",
+    "type", "smart_type",
+    "scroll", "smart_scroll",
+    "drag", "smart_drag",
+    "hotkey", "smart_hotkey", "keys", "press",
+    "fill",
+    "focus", "smart_focus",
+    "window_min", "window_minimize", "window_max", "window_maximize",
+    "window_restore", "window_close", "window", "window_state",
+    "launch", "start", "run", "open", "open_path", "open_url",
+    "screenshot", "shot",
+    "clipboard_set", "clipboard_image_set", "clipboard_set_image",
+    "desktop",
+    "browser_connect", "browser_spaces", "browser_create_space",
+    "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
+    "browser_press", "browser_scroll", "browser_wait", "browser_fill",
+    "browser_eval", "browser_close_space",
+})
+
+# Read-only / lease-management ops (no lease required). Documented in docs/JARVIS.md.
+LEASE_FREE_OPS = frozenset({
+    "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
+    "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
+    "wait_cdp", "wait_for_cdp", "eyes", "apps", "files_list",
+    "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
+    "wait", "wait_until", "wait_gone", "wait_change", "wait_window", "verify", "verify_ui",
+    "notify", "clipboard_image_save",
+    "kill_switch", "arm_kill_switch", "disarm_kill_switch",
+    "action_log", "log", "recent_actions",
+})
+
+
+def _lease_denied() -> Dict[str, Any]:
+    return {"ok": False, "error": "desktop lease required"}
+
+
+def _action_result(value: Any) -> Dict[str, Any]:
+    target = getattr(value, "target", None)
+    target_out = None
+    if target is not None:
+        meta = getattr(target, "meta", None) or {}
+        target_out = {
+            "label": getattr(target, "label", None),
+            "role": meta.get("role"),
+            "confidence": round(float(getattr(target, "confidence", 0.0)), 3),
+            "at": [getattr(target, "x", None), getattr(target, "y", None)],
+        }
+    success = bool(getattr(value, "success", False))
+    out: Dict[str, Any] = {
+        "ok": success,
+        "success": success,
+        "message": getattr(value, "message", ""),
+    }
+    for name in ("verified", "backend", "attempts", "from_memory"):
+        if hasattr(value, name):
+            out[name] = getattr(value, name)
+    if target_out is not None:
+        out["target"] = target_out
+    return out
+
+
+def _failed(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    return value.get("ok") is False or value.get("success") is False
+
+
+class AetherExecEngine:
+    """Persistent desktop/browser controller behind the slim MCP."""
+
+    def __init__(self, controller: Optional[SmartController] = None):
+        self.ctrl = controller or SmartController(
+            prefer_cua=None, max_retries=3, verify=True, cache_ttl=0.35
+        )
+        self._browser = None
+        self._script_lease_token: Optional[str] = None
+        self._action_log: List[Dict[str, Any]] = []
+
+    def _get_browser(self):
+        if self._browser is None:
+            from aether.browser import BrowserEngineSync
+
+            # Do NOT call start() here. start() launches a fresh Chromium profile and
+            # breaks later browser_connect (CDP attach). Non-CDP callers still trigger
+            # start via ensure_started() on first navigate/snapshot.
+            self._browser = BrowserEngineSync(headless=False)
+        return self._browser
+
+    @staticmethod
+    def parse(script: Any) -> List[Dict[str, Any]]:
+        if isinstance(script, str):
+            try:
+                script = json.loads(script)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Script must be valid JSON: {exc.msg}") from exc
+        if isinstance(script, Mapping):
+            script = script.get("steps")
+        if not isinstance(script, Sequence) or isinstance(script, (str, bytes, bytearray)):
+            raise ValueError("Script must be a JSON array or an object with a steps array.")
+        if len(script) > MAX_STEPS:
+            raise ValueError(f"Script has {len(script)} steps; maximum is {MAX_STEPS}.")
+        steps: List[Dict[str, Any]] = []
+        for index, value in enumerate(script):
+            if not isinstance(value, Mapping):
+                raise ValueError(f"Step {index} must be an object.")
+            steps.append(dict(value))
+        return steps
+
+    def execute(self, script: Any, stop_on_failure: bool = True) -> Dict[str, Any]:
+        try:
+            steps = self.parse(script)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "steps": []}
+
+        results: List[Dict[str, Any]] = []
+        started = time.perf_counter()
+        # Keep held lease across execute() calls; clear only on release/force/expired.
+        for index, step in enumerate(steps):
+            op = str(step.get("op") or "").strip().lower().replace("-", "_")
+            step_started = time.perf_counter()
+            try:
+                # Hard-cap wait/browser steps so a dead target cannot hang the script.
+                if op.startswith("wait") or op.startswith("browser_") or op in {
+                    "focus", "smart_focus", "verify", "verify_ui", "observe", "compact_observe", "read_ui",
+                }:
+                    value = self._run_step_bounded(op, step, timeout_s=float(step.get("timeout", 14.0)))
+                else:
+                    value = self._run_step(op, step)
+            except Exception as exc:  # keep a multi-step run inspectable
+                value = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            results.append(
+                {
+                    "step": index,
+                    "op": op,
+                    "elapsed_ms": round((time.perf_counter() - step_started) * 1000),
+                    "result": value,
+                }
+            )
+            should_stop = step.get("stop_on_failure", stop_on_failure)
+            if should_stop and _failed(value):
+                break
+
+        stopped_early = len(results) < len(steps)
+        return {
+            "ok": not any(_failed(item["result"]) for item in results),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000),
+            "completed": len(results),
+            "requested": len(steps),
+            "stopped_early": stopped_early,
+            "steps": results,
+        }
+
+    def _lease_token(self, step: Dict[str, Any]) -> Optional[str]:
+        token = (
+            step.get("lease")
+            or step.get("lease_token")
+            or step.get("token")
+            or self._script_lease_token
+        )
+        if token is None:
+            return None
+        return str(token).strip() or None
+
+    def _ensure_lease(self, op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        needs = False
+        if op.startswith("browser_") or op in LEASE_REQUIRED_OPS:
+            needs = True
+        if op == "proc":
+            action = str(step.get("action") or step.get("mode") or "list").lower()
+            needs = action in {"kill", "stop", "terminate"}
+        if op == "desktop":
+            action = str(step.get("action") or "list").lower()
+            needs = action in {"switch", "goto", "set"}
+        if not needs:
+            return None
+        token = self._lease_token(step)
+        if not token or not desktop_lease.validate(token):
+            return _lease_denied()
+        return None
+
+
+    def _is_mutating_op(self, op: str, step: Dict[str, Any]) -> bool:
+        if op in {
+            "kill_switch", "arm_kill_switch", "disarm_kill_switch",
+            "action_log", "log", "recent_actions",
+            "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
+            "cursor_exec", "cursor_run", "create_cursor", "cursor_create", "list_cursors", "cursors",
+        }:
+            return False
+        if op in LEASE_FREE_OPS and op != "notify":
+            # read-only / wait / verify — not injects
+            if op.startswith("wait") or op.startswith("verify") or op in {
+                "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
+                "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
+                "eyes", "apps", "files_list", "notify", "clipboard_image_save", "wait_window",
+            }:
+                return False
+        if op == "proc":
+            action = str(step.get("action") or step.get("mode") or "list").lower()
+            return action in {"kill", "stop", "terminate"}
+        if op == "desktop":
+            action = str(step.get("action") or "list").lower()
+            return action in {"switch", "goto", "set"}
+        if op.startswith("browser_") or op in LEASE_REQUIRED_OPS:
+            return True
+        return False
+
+    def _step_safety_text(self, op: str, step: Dict[str, Any]) -> str:
+        chunks: List[str] = []
+        for key in ("text", "query", "command", "path", "exe", "url", "target", "keys", "key", "hotkey"):
+            val = step.get(key)
+            if val is None:
+                continue
+            if isinstance(val, (list, tuple)):
+                chunks.append(" ".join(str(x) for x in val))
+            else:
+                chunks.append(str(val))
+        fields = step.get("fields")
+        if isinstance(fields, Mapping):
+            chunks.extend(str(v) for v in fields.values())
+            chunks.extend(str(k) for k in fields.keys())
+        args = step.get("args")
+        if isinstance(args, (list, tuple)):
+            chunks.extend(str(a) for a in args)
+        elif args:
+            chunks.append(str(args))
+        return " ".join(chunks)
+
+    def _ensure_safety(self) -> Any:
+        ctrl = self.ctrl
+        safety = getattr(ctrl, "safety", None)
+        if safety is not None:
+            return safety
+        from aether.safety import SafetyGate, SafetyConfig
+        from aether.config import AetherConfig
+        try:
+            cfg = AetherConfig.load()
+            sc = SafetyConfig(
+                max_actions_per_minute=int(cfg.max_actions_per_minute),
+                max_clicks_per_minute=int(cfg.max_clicks_per_minute),
+            )
+        except Exception:
+            sc = SafetyConfig()
+        safety = SafetyGate(sc)
+        try:
+            ctrl.safety = safety
+        except Exception:
+            pass
+        return safety
+
+    def _safety_block(self, op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not self._is_mutating_op(op, step):
+            return None
+        safety = self._ensure_safety()
+        kind = "click" if op in {"click", "smart_click", "browser_click"} else "action"
+        text = self._step_safety_text(op, step)
+        confirm = bool(step.get("confirm"))
+        ok, why = safety.check(kind=kind, text=text, confirm=confirm, record=True)
+        if not ok:
+            return {"ok": False, "success": False, "error": why, "blocked": True}
+        # Prevent double-count when SmartController methods also call safety.check
+        try:
+            setattr(self.ctrl, "_safety_prechecked", True)
+        except Exception:
+            pass
+        return None
+
+    def _record_action(self, op: str, step: Dict[str, Any], value: Any) -> None:
+        if not self._is_mutating_op(op, step):
+            return
+        ok = True
+        if isinstance(value, Mapping):
+            if value.get("ok") is False or value.get("success") is False:
+                ok = False
+        entry = {
+            "ts": time.time(),
+            "op": op,
+            "ok": ok,
+            "outcome": "ok" if ok else "fail",
+        }
+        if isinstance(value, Mapping):
+            if value.get("error"):
+                entry["error"] = value.get("error")
+            if value.get("message"):
+                entry["message"] = value.get("message")
+        self._action_log.append(entry)
+        if len(self._action_log) > 500:
+            del self._action_log[: len(self._action_log) - 500]
+        log = getattr(self.ctrl, "log", None)
+        if log is not None and hasattr(log, "record"):
+            try:
+                log.record(op, ok=ok, **{k: entry[k] for k in ("error", "message") if k in entry})
+            except Exception:
+                pass
+
+    def _action_log_tail(self, n: int = 20) -> Dict[str, Any]:
+        n = max(1, min(200, int(n)))
+        items: List[Dict[str, Any]] = []
+        recent = getattr(self.ctrl, "recent_actions", None)
+        if callable(recent):
+            try:
+                items = list(recent(n)) or []
+            except Exception:
+                items = []
+        if not items:
+            items = list(self._action_log[-n:])
+        return {"ok": True, "count": len(items), "entries": items, "actions": items}
+
+
+    def _require_focus(self, op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Hard-fail click/type/fill/keys when nothing is focused."""
+        if op not in {
+            "click", "smart_click", "type", "smart_type", "fill",
+            "keys", "press", "hotkey", "smart_hotkey",
+        }:
+            return None
+        ctrl = self.ctrl
+        # Explicit title/pid on the step: focus first, fail if it fails.
+        if step.get("title") or step.get("pid") is not None:
+            focused = ctrl.smart_focus(title=step.get("title"), pid=step.get("pid"))
+            if not isinstance(focused, dict) or not focused.get("ok"):
+                return {
+                    "ok": False,
+                    "success": False,
+                    "error": "act-without-focus: focus failed",
+                    "blocked": True,
+                    "detail": focused,
+                }
+            return None
+        wid = getattr(ctrl, "_focus_window_id", None)
+        pid = getattr(ctrl, "_focus_pid", None)
+        if not wid and not pid:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "act-without-focus: no focused window",
+                "blocked": True,
+            }
+        return None
+
+    def _screenshot_window_bind(
+        self, title: Any, focused: Mapping[str, Any], state: Mapping[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Fail closed if capture is not bound to the requested title/HWND."""
+        want = str(title or "").strip().lower()
+        if not want:
+            return None
+        got = str(focused.get("title") or state.get("title") or "").strip().lower()
+        # Fail closed when bind cannot be confirmed (empty actual) or titles diverge.
+        if (not got) or (want not in got and got not in want):
+            return {
+                "ok": False,
+                "error": "screenshot wrong-window: title mismatch",
+                "requested": title,
+                "actual": focused.get("title") or state.get("title"),
+            }
+        if focused.get("window_id") is not None and state.get("known"):
+            # If state carries a window_id/hwnd, require match when present.
+            for key in ("window_id", "hwnd"):
+                if key in state and state.get(key) is not None:
+                    if int(state.get(key)) != int(focused.get("window_id")):
+                        return {
+                            "ok": False,
+                            "error": "screenshot wrong-window: HWND mismatch",
+                            "requested": focused.get("window_id"),
+                            "actual": state.get(key),
+                        }
+        return None
+
+    def _run_step(self, op: str, step: Dict[str, Any]) -> Any:
+        ctrl = self.ctrl
+        denied = self._ensure_lease(op, step)
+        if denied is not None:
+            return denied
+        blocked = self._safety_block(op, step)
+        if blocked is not None:
+            self._record_action(op, step, blocked)
+            return blocked
+        no_focus = self._require_focus(op, step)
+        if no_focus is not None:
+            self._record_action(op, step, no_focus)
+            return no_focus
+        try:
+            value = self._dispatch_step(op, step)
+        finally:
+            try:
+                setattr(ctrl, "_safety_prechecked", False)
+            except Exception:
+                pass
+        self._record_action(op, step, value)
+        return value
+
+    def _dispatch_step(self, op: str, step: Dict[str, Any]) -> Any:
+        ctrl = self.ctrl
+        if op in {"cursor_exec", "cursor_run"}:
+            cid = str(step.get("cursor_id") or step.get("cursor") or "main")
+            steps = step.get("steps") or step.get("script") or []
+            return ctrl.cursor_exec(cid, steps, stop_on_failure=bool(step.get("stop_on_failure", True)))
+        if op in {"create_cursor", "cursor_create"}:
+            return ctrl.create_cursor(str(step.get("cursor_id") or step.get("id") or step.get("cursor") or "main"))
+        if op in {"list_cursors", "cursors"}:
+            return {"ok": True, "cursors": ctrl.list_cursors()}
+        if op == "status":
+            return ctrl.status()
+        if op in {"windows", "list_windows"}:
+            return ctrl.list_windows()
+        if op in {"focus", "smart_focus"}:
+            focused = ctrl.smart_focus(title=step.get("title"), pid=step.get("pid"))
+            token = self._lease_token(step)
+            if token and isinstance(focused, dict) and focused.get("ok"):
+                desktop_lease.set_last_focus(
+                    token,
+                    {"title": focused.get("title"), "pid": focused.get("pid"),
+                     "window_id": focused.get("window_id")},
+                )
+            return focused
+        if op in {"read", "read_ui"}:
+            return ctrl.read_ui(
+                force=step.get("force", True),
+                interactive_only=step.get("interactive", step.get("interactive_only", False)),
+                max_elements=int(step.get("max_elements", 120)),
+            )
+        if op in {"observe", "compact_observe"}:
+            return ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", True)))
+        if op in {"click", "smart_click"}:
+            return _action_result(
+                ctrl.smart_click(
+                    query=step.get("query"),
+                    x=step.get("x"),
+                    y=step.get("y"),
+                    button=step.get("button", "left"),
+                    require_change=bool(step.get("require_change", False)),
+                )
+            )
+        if op in {"type", "smart_type"}:
+            _kwargs = dict(
+                text=str(step.get("text", "")),
+                query=step.get("query"),
+                clear=bool(step.get("clear", False)),
+            )
+            try:
+                _out = ctrl.smart_type(**_kwargs, confirm=bool(step.get("confirm", False)))
+            except TypeError:
+                _out = ctrl.smart_type(**_kwargs)
+            return _action_result(_out)
+        if op in {"scroll", "smart_scroll"}:
+            return _action_result(
+                ctrl.smart_scroll(
+                    dy=int(step.get("dy", 600)),
+                    dx=int(step.get("dx", 0)),
+                    query=step.get("query"),
+                )
+            )
+        if op in {"drag", "smart_drag"}:
+            return _action_result(
+                ctrl.smart_drag(
+                    start_query=step.get("start_query"),
+                    end_query=step.get("end_query"),
+                    start=step.get("start"),
+                    end=step.get("end"),
+                    duration=float(step.get("duration", 0.35)),
+                )
+            )
+        if op in {"hotkey", "smart_hotkey"}:
+            return _action_result(ctrl.smart_hotkey(step.get("keys") or []))
+        if op == "fill":
+            return ctrl.smart_fill(
+                fields=step.get("fields") or {},
+                submit=step.get("submit"),
+                clear=bool(step.get("clear", True)),
+            )
+        if op in {"wait", "wait_until"}:
+            if "seconds" in step:
+                seconds = min(MAX_WAIT_SECONDS, max(0.0, float(step["seconds"])))
+                time.sleep(seconds)
+                return {"ok": True, "slept": seconds}
+            return _action_result(
+                ctrl.wait_until(
+                    query=step.get("query"),
+                    text_contains=step.get("text_contains"),
+                    timeout=min(MAX_WAIT_SECONDS, float(step.get("timeout", 15.0))),
+                    poll=float(step.get("poll", 0.2)),
+                )
+            )
+        if op == "wait_gone":
+            return _action_result(
+                ctrl.wait_gone(
+                    query=str(step.get("query", "")),
+                    timeout=min(MAX_WAIT_SECONDS, float(step.get("timeout", 15.0))),
+                )
+            )
+        if op == "wait_change":
+            return _action_result(
+                ctrl.wait_change(
+                    timeout=min(MAX_WAIT_SECONDS, float(step.get("timeout", 10.0))),
+                    poll=float(step.get("poll", 0.35)),
+                    threshold=step.get("threshold"),
+                    expect=step.get("expect") or step.get("text") or step.get("text_contains") or step.get("query"),
+                )
+            )
+        if op in {"verify", "verify_ui"}:
+            expect = step.get("expect")
+            if expect is None and step.get("text"):
+                expect = step.get("text")
+            if isinstance(expect, str):
+                expect = [expect]
+            gone = step.get("expect_gone", step.get("gone"))
+            if isinstance(gone, str):
+                gone = [gone]
+            return ctrl.verify_ui(
+                expect=expect,
+                expect_gone=gone,
+                timeout=min(MAX_WAIT_SECONDS, float(step.get("timeout", 6.0))),
+            )
+        if op == "clipboard_get":
+            return ctrl.clipboard_get()
+        if op == "clipboard_set":
+            return ctrl.clipboard_set(str(step.get("text", "")))
+        if op == "stats":
+            return ctrl.stats(reset=bool(step.get("reset", False)))
+
+        browser = self._get_browser() if op.startswith("browser_") else None
+        if op == "browser_connect":
+            return browser.connect_cdp(step.get("endpoint", "http://127.0.0.1:9222"))
+        if op == "browser_spaces":
+            return browser.list_spaces()
+        if op == "browser_create_space":
+            return {"ok": True, "space_id": browser.create_space(step.get("name"))}
+        if op == "browser_navigate":
+            return browser.navigate(
+                str(step.get("url", "")), step.get("space_id"), step.get("wait", "domcontentloaded")
+            )
+        if op == "browser_snapshot":
+            return browser.snapshot(step.get("space_id"), bool(step.get("include_screenshot", False)))
+        if op == "browser_click":
+            return browser.click(
+                step.get("ref"), step.get("selector"), step.get("x"), step.get("y"), step.get("space_id"),
+                text=step.get("text") or step.get("name") or step.get("query"),
+                name=step.get("name"),
+                query=step.get("query"),
+            )
+        if op == "browser_type":
+            return browser.type_text(
+                str(step.get("text", "")), step.get("ref"), step.get("selector"),
+                bool(step.get("clear", False)), step.get("space_id")
+            )
+        if op == "browser_press":
+            return browser.press(str(step.get("key", "")), step.get("space_id"))
+        if op == "browser_scroll":
+            return browser.scroll(int(step.get("dy", 600)), step.get("space_id"))
+        if op == "browser_wait":
+            # Op layer uses SECONDS (like wait_change). Playwright wants ms.
+            raw_t = float(step.get("timeout", 15))
+            timeout_ms = raw_t * 1000.0 if raw_t <= 300 else raw_t  # <=300 => seconds
+            timeout_ms = min(60000.0, timeout_ms)
+            return browser.wait_for(
+                text=step.get("text") or step.get("name") or step.get("query"),
+                selector=step.get("selector"),
+                timeout=timeout_ms,
+                space_id=step.get("space_id"),
+                name=step.get("name"),
+                query=step.get("query"),
+            )
+        if op == "browser_fill":
+            fields = step.get("fields")
+            if not fields:
+                needle = step.get("text") or step.get("name") or step.get("query") or step.get("label")
+                value = step.get("value")
+                if value is None:
+                    value = step.get("text_value") or step.get("input")
+                if needle is not None and value is not None:
+                    fields = {str(needle): str(value)}
+                else:
+                    return {
+                        "ok": False,
+                        "error": "browser_fill requires fields{} or text/name + value",
+                        "results": [],
+                    }
+            return browser.fill_form(fields or {}, step.get("space_id"))
+        if op == "browser_eval":
+            return browser.evaluate(str(step.get("js", "")), step.get("space_id"))
+        if op == "browser_close_space":
+            return browser.close_space(str(step.get("space_id", "")))
+
+        if op in {"screenshot", "shot"}:
+            # path => write file; otherwise return compact base64 JPEG via engine helper
+            out = step.get("path") or step.get("out")
+            title = step.get("title")
+            focused = None
+            if title:
+                focused = ctrl.smart_focus(title=str(title))
+                if not focused.get("ok"):
+                    return focused
+            if out:
+                state = ctrl.window_state(ctrl._focus_window_id)
+                if title and focused is not None:
+                    mismatch = self._screenshot_window_bind(title, focused, state if isinstance(state, dict) else {})
+                    if mismatch is not None:
+                        return mismatch
+                rect = state.get("rect") if state.get("known") else None
+                image = ctrl.perception.capture(
+                    monitor=int(step.get("monitor", 1)),
+                    region=tuple(rect) if rect else None,
+                )
+                if image is None:
+                    return {"ok": False, "error": "Screen capture failed."}
+                Path(str(out)).parent.mkdir(parents=True, exist_ok=True)
+                image.save(str(out))
+                return {"ok": True, "path": str(out), "size": list(image.size), "window": state}
+            # When title is bound, verify via helper after capture metadata
+            shot = self.screenshot(
+                title=None,
+                monitor=int(step.get("monitor", 1)),
+                max_side=int(step.get("max_side", 1600)),
+                quality=int(step.get("quality", 78)),
+            )
+            if title and focused is not None and isinstance(shot, dict) and shot.get("ok"):
+                mismatch = self._screenshot_window_bind(title, focused, shot.get("window") or {})
+                if mismatch is not None:
+                    return mismatch
+            return shot
+
+        if op in {"cdp", "cdp_discover", "exo_cdp"}:
+            from aether import exo_bridge
+            endpoints = exo_bridge.discover_cdp_endpoints(
+                extra_ports=[int(step["port"])] if step.get("port") else None
+            )
+            return {"ok": True, "endpoints": endpoints, "count": len(endpoints)}
+
+        if op in {"wait_cdp", "wait_for_cdp"}:
+            return self._wait_cdp(step)
+
+        if op in {"launch", "start", "run"}:
+            import os
+            import subprocess
+            from aether.launch_resolve import resolve_launch_target
+            raw = step.get("command") or step.get("path") or step.get("exe")
+            resolved = resolve_launch_target(
+                raw, app=step.get("app"), name=step.get("name"), query=step.get("query"),
+            )
+            if not resolved.get("ok"):
+                return resolved
+            command = resolved["command"]
+            args = step.get("args") or []
+            if isinstance(args, str):
+                args = [args]
+            cwd = step.get("cwd") or None
+            env = os.environ.copy()
+            extra = step.get("env") or {}
+            if isinstance(extra, dict):
+                env.update({str(k): str(v) for k, v in extra.items()})
+            cdp_port = step.get("cdp_port") or step.get("port")
+            if step.get("wait_cdp") or cdp_port is not None:
+                port = int(cdp_port or 9229)
+                env["EXO_CDP"] = "1"
+                env["EXOOS_CDP"] = "1"
+                env["AETHER_CDP"] = "1"
+                env["EXO_CDP_PORT"] = str(port)
+                env["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+                    f"--remote-debugging-port={port}"
+                )
+            creationflags = 0
+            if os.name == "nt":
+                # CREATE_UNICODE_ENVIRONMENT keeps a custom env map reliable on Windows.
+                creationflags |= int(getattr(subprocess, "CREATE_UNICODE_ENVIRONMENT", 0x00000400))
+                if not step.get("console"):
+                    creationflags |= getattr(subprocess, "DETACHED_PROCESS", 0)
+                    creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            out = {"ok": True, "command": str(command), "method": resolved.get("method"), "app": resolved.get("app")}
+            if resolved.get("shell") and os.name == "nt":
+                import ctypes
+                params = " ".join(str(a) for a in args) if args else None
+                rc = int(ctypes.windll.shell32.ShellExecuteW(
+                    None, "open", str(command), params, cwd, 1,
+                ))
+                if rc <= 32:
+                    return {"ok": False, "error": "ShellExecute failed code=%s" % rc,
+                            "command": str(command), "method": resolved.get("method")}
+                out["pid"] = None
+            else:
+                proc = subprocess.Popen(
+                    [str(command), *[str(a) for a in args]],
+                    cwd=cwd,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                )
+                out["pid"] = proc.pid
+            # Optional window-ready wait (fuzzy launch -> ready)
+            title = step.get("wait_window") or step.get("title_contains") or step.get("title") or step.get("window_title")
+            if step.get("wait_ready") or title:
+                from pathlib import Path as _P
+                stem = str(resolved.get("app") or _P(str(command)).stem)
+                ww = {
+                    "title_contains": stem if isinstance(title, bool) else title,
+                    "timeout": step.get("timeout", 10.0),
+                    "poll": step.get("poll", 0.25),
+                }
+                ready = _wait_window(ctrl, ww)
+                out["window"] = ready
+                if not ready.get("ok"):
+                    out["ok"] = False
+                    out["error"] = ready.get("error") or "window not ready"
+                    return out
+                if ready.get("pid") and not out.get("pid"):
+                    out["pid"] = ready.get("pid")
+            if step.get("wait_cdp"):
+                wait_step = {
+                    "timeout": step.get("timeout", 15.0),
+                    "poll": step.get("poll", 0.25),
+                }
+                if cdp_port is not None:
+                    wait_step["port"] = int(cdp_port)
+                cdp = self._wait_cdp(wait_step)
+                out["cdp"] = cdp
+                out["endpoints"] = cdp.get("endpoints") or []
+                out["count"] = cdp.get("count", 0)
+                if not cdp.get("ok"):
+                    out["ok"] = False
+                    out["error"] = cdp.get("error") or "CDP wait failed"
+            return out
+
+        if op in {"open", "open_path", "open_url"}:
+            import os
+            target = step.get("path") or step.get("url") or step.get("target")
+            if not target:
+                return {"ok": False, "error": "open requires path/url/target"}
+            os.startfile(str(target))  # type: ignore[attr-defined]
+            return {"ok": True, "opened": str(target)}
+
+        if op in {
+            "window_min", "window_minimize",
+            "window_max", "window_maximize",
+            "window_restore",
+            "window_close",
+            "window", "window_state",
+        }:
+            if step.get("title"):
+                focused = ctrl.smart_focus(title=str(step.get("title")))
+                if not focused.get("ok"):
+                    return focused
+            hwnd = step.get("hwnd") or step.get("window_id")
+            hwnd_i = int(hwnd) if hwnd is not None else None
+            if op in {"window_min", "window_minimize"}:
+                return ctrl.window_min(hwnd_i)
+            if op in {"window_max", "window_maximize"}:
+                return ctrl.window_max(hwnd_i)
+            if op == "window_restore":
+                return ctrl.window_restore(hwnd_i)
+            if op == "window_close":
+                return ctrl.window_close(hwnd_i)
+            action = str(step.get("action") or step.get("state") or "state").lower()
+            if action in {"minimize", "min"}:
+                return ctrl.window_min(hwnd_i)
+            if action in {"maximize", "max"}:
+                return ctrl.window_max(hwnd_i)
+            if action in {"restore", "show"}:
+                return ctrl.window_restore(hwnd_i)
+            if action in {"close", "quit"}:
+                return ctrl.window_close(hwnd_i)
+            if action in {"state", "status"}:
+                h = ctrl._focus_window_id if hwnd_i is None else hwnd_i
+                if h is None:
+                    return {"ok": False, "error": "no focused window"}
+                return {"ok": True, "window_id": int(h), "window": ctrl.window_state(h)}
+            return {"ok": False, "error": f"unknown window action: {action}"}
+
+        if op in {"keys", "press"}:
+            # hotkey alias that accepts "keys": "ctrl+l" or list
+            keys = step.get("keys") or step.get("key") or step.get("hotkey")
+            if isinstance(keys, str):
+                keys = [part for part in keys.replace("-", "+").split("+") if part]
+            elif not isinstance(keys, list):
+                keys = []
+            return _action_result(ctrl.smart_hotkey(keys))
+
+
+
+        if op == "lease_acquire":
+            out = desktop_lease.acquire(
+                agent_id=str(step.get("agent") or step.get("agent_id") or ""),
+                task=str(step.get("task") or ""),
+                ttl_sec=float(step.get("ttl_sec", step.get("ttl", 120))),
+            )
+            if out.get("ok") and out.get("token"):
+                self._script_lease_token = str(out["token"])
+            return out
+        if op == "lease_renew":
+            token = self._lease_token(step) or str(step.get("token") or "")
+            out = desktop_lease.renew(
+                token=token,
+                ttl_sec=float(step.get("ttl_sec", step.get("ttl", 120))),
+            )
+            if out.get("ok") and out.get("token"):
+                self._script_lease_token = str(out["token"])
+            return out
+        if op == "lease_release":
+            token = self._lease_token(step) or str(step.get("token") or "")
+            out = desktop_lease.release(token=token)
+            if out.get("ok") and out.get("released"):
+                if self._script_lease_token == token:
+                    self._script_lease_token = None
+            return out
+        if op == "lease_status":
+            return desktop_lease.status()
+
+        if op == "eyes":
+            observe = ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", True)))
+            from aether import exo_bridge
+            endpoints = exo_bridge.discover_cdp_endpoints(
+                extra_ports=[int(step["port"])] if step.get("port") else None
+            )
+            summary = [
+                {
+                    "endpoint": e.get("endpoint"),
+                    "port": e.get("port"),
+                    "browser": e.get("browser"),
+                    "targets": len(e.get("targets") or []),
+                }
+                for e in endpoints
+            ]
+            return {
+                "ok": True,
+                "observe": observe,
+                "cdp": {"endpoints": summary, "count": len(summary)},
+                "cdp_count": len(summary),
+            }
+
+        if op == "apps":
+            return _list_apps(max_items=int(step.get("max", 80)))
+
+        if op == "proc":
+            action = str(step.get("action") or step.get("mode") or "list").lower()
+            if action in {"list", "ls"}:
+                out = _list_procs(max_items=int(step.get("max", 120)))
+                if isinstance(out, dict):
+                    out = {**out, "action": "list"}
+                return out
+            if action in {"kill", "stop", "terminate"}:
+                if not bool(step.get("confirm")):
+                    return {"ok": False, "error": "proc kill requires confirm=true"}
+                pid = step.get("pid")
+                if pid is None:
+                    return {"ok": False, "error": "proc kill requires pid"}
+                out = _kill_proc(int(pid))
+                if isinstance(out, dict):
+                    out = {**out, "action": "kill"}
+                return out
+            return {"ok": False, "error": f"unknown proc action: {action}"}
+
+        if op == "files_list":
+            return _files_list(
+                path=str(step.get("path") or "."),
+                max_items=int(step.get("max", step.get("limit", 200))),
+            )
+
+        if op == "clipboard_image_save":
+            out_path = step.get("path") or step.get("out")
+            if not out_path:
+                return {"ok": False, "error": "clipboard_image_save requires path"}
+            return _clipboard_image_save(str(out_path))
+
+        if op in {"clipboard_image_set", "clipboard_set_image"}:
+            img_path = step.get("path") or step.get("image") or step.get("file")
+            if not img_path:
+                return {"ok": False, "error": "clipboard_image_set requires path"}
+            from aether.clipboard import set_clipboard_image
+            return set_clipboard_image(str(img_path))
+
+        if op == "wait_window":
+            return _wait_window(ctrl, step)
+
+        if op == "desktop":
+            return _desktop_op(step)
+
+        if op == "notify":
+            title = str(step.get("title") or "Aether")
+            body = str(step.get("body") or step.get("message") or step.get("text") or "")
+            # LIVE default is a real toast. Stub ONLY when the step explicitly sets stub:true.
+            # AETHER_NOTIFY_STUB is ignored here so a leftover process env cannot fake "done".
+            if step.get("stub") is True:
+                return {"ok": True, "stub": True, "title": title, "body": body, "queued": True}
+            out = _notify_toast(title, body)
+            if isinstance(out, dict):
+                out["stub"] = False
+            return out
+
+        
+        if op == "lease_force_release":
+            token = self._lease_token(step) or str(step.get("token") or "") or None
+            agent = step.get("agent") or step.get("agent_id")
+            out = desktop_lease.force_release(token=token, agent_id=str(agent) if agent else None)
+            if out.get("ok") and out.get("released"):
+                if token and self._script_lease_token == str(token):
+                    self._script_lease_token = None
+                elif not token:
+                    self._script_lease_token = None
+            return out
+
+        if op in {"kill_switch", "arm_kill_switch", "disarm_kill_switch"}:
+            safety = self._ensure_safety()
+            if op == "arm_kill_switch":
+                armed = True
+            elif op == "disarm_kill_switch":
+                armed = False
+            else:
+                if "armed" in step:
+                    armed = bool(step.get("armed"))
+                elif "enable" in step:
+                    armed = bool(step.get("enable"))
+                else:
+                    armed = True
+            if armed:
+                safety.arm_kill_switch()
+            else:
+                safety.disarm_kill_switch()
+            knobs = getattr(ctrl, "kill_switch", None)
+            if callable(knobs):
+                try:
+                    knobs(armed=armed)
+                except Exception:
+                    pass
+            return {"ok": True, "kill_switch": bool(safety.config.kill_switch), "armed": bool(safety.config.kill_switch)}
+
+        if op in {"action_log", "log", "recent_actions"}:
+            return self._action_log_tail(n=int(step.get("n") or step.get("limit") or step.get("last") or 20))
+
+        return {"ok": False, "error": f"Unknown operation: {op or '<empty>'}"}
+
+
+
+    def _run_step_bounded(self, op: str, step: Dict[str, Any], timeout_s: float = 14.0) -> Dict[str, Any]:
+        """Wall-clock cap so dead HWND/UIA cannot hang execute >=15s."""
+        import concurrent.futures
+        timeout_s = max(0.5, min(MAX_WAIT_SECONDS, float(timeout_s)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(self._run_step, op, step)
+            try:
+                return fut.result(timeout=timeout_s)
+            except concurrent.futures.TimeoutError:
+                return {
+                    "ok": False,
+                    "error": "step timed out after %.1fs (target may be dead)" % timeout_s,
+                    "timeout": timeout_s,
+                    "crashed": True,
+                }
+
+    def _wait_cdp(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """Poll discover_cdp_endpoints until count>0 or timeout (default 15s)."""
+        from aether import exo_bridge
+
+        timeout = min(MAX_WAIT_SECONDS, max(0.0, float(step.get("timeout", 15.0))))
+        poll = max(0.05, float(step.get("poll", 0.25)))
+        port = step.get("port") or step.get("cdp_port")
+        extra_ports = [int(port)] if port is not None else None
+        started = time.perf_counter()
+        endpoints: List[Dict[str, Any]] = []
+        while True:
+            endpoints = exo_bridge.discover_cdp_endpoints(extra_ports=extra_ports)
+            if endpoints:
+                return {
+                    "ok": True,
+                    "endpoints": endpoints,
+                    "count": len(endpoints),
+                    "waited": round(time.perf_counter() - started, 3),
+                }
+            if (time.perf_counter() - started) >= timeout:
+                return {
+                    "ok": False,
+                    "error": f"CDP endpoint not found within {timeout}s",
+                    "endpoints": [],
+                    "count": 0,
+                    "timeout": timeout,
+                    "waited": round(time.perf_counter() - started, 3),
+                }
+            time.sleep(min(poll, max(0.0, timeout - (time.perf_counter() - started))))
+
+    def screenshot(
+        self,
+        title: Optional[str] = None,
+        monitor: int = 1,
+        max_side: int = 1600,
+        quality: int = 78,
+    ) -> Dict[str, Any]:
+        if title:
+            focused = self.ctrl.smart_focus(title=title)
+            if not focused.get("ok"):
+                return focused
+        state = self.ctrl.window_state(self.ctrl._focus_window_id)
+        rect = state.get("rect") if state.get("known") else None
+        image = self.ctrl.perception.capture(
+            monitor=monitor, region=tuple(rect) if rect else None
+        )
+        if image is None:
+            return {"ok": False, "error": "Screen capture failed."}
+        if max(image.size) > max_side:
+            scale = max_side / max(image.size)
+            image = image.resize(
+                (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+            )
+        stream = io.BytesIO()
+        image.convert("RGB").save(stream, format="JPEG", quality=max(40, min(92, quality)))
+        return {
+            "ok": True,
+            "mime_type": "image/jpeg",
+            "image_base64": base64.b64encode(stream.getvalue()).decode("ascii"),
+            "size": list(image.size),
+            "window": state,
+        }
+
+
+def _list_running_apps(max_apps: int = 80) -> List[Dict[str, Any]]:
+    """Return a plain list of {pid,title,exe,hwnd} (monkeypatch target for tests)."""
+    result = _list_apps_impl(max_items=max_apps)
+    if isinstance(result, dict):
+        return list(result.get("apps") or [])
+    return []
+
+
+def _list_apps(max_items: int = 80) -> Dict[str, Any]:
+    apps = _list_running_apps(max_apps=max_items)
+    return {"ok": True, "apps": apps, "count": len(apps)}
+
+
+def _list_apps_impl(max_items: int = 80) -> Dict[str, Any]:
+    """Best-effort running apps with pid/title/exe (Windows)."""
+    import os
+    if os.name != "nt":
+        return {"ok": True, "apps": [], "note": "apps op is Windows-only"}
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        apps = []
+        seen = set()
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def _enum(hwnd, _lparam):
+            if len(apps) >= max_items:
+                return False
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value.strip()
+            if not title:
+                return True
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value in seen:
+                return True
+            seen.add(pid.value)
+            exe = ""
+            try:
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+                if h:
+                    try:
+                        size = wintypes.DWORD(260)
+                        ebuf = ctypes.create_unicode_buffer(260)
+                        if kernel32.QueryFullProcessImageNameW(h, 0, ebuf, ctypes.byref(size)):
+                            exe = ebuf.value
+                    finally:
+                        kernel32.CloseHandle(h)
+            except Exception:
+                pass
+            apps.append({"pid": int(pid.value), "title": title, "exe": exe, "hwnd": int(hwnd)})
+            return True
+
+        user32.EnumWindows(_enum, 0)
+        return {"ok": True, "apps": apps, "count": len(apps)}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _list_procs(max_items: int = 120) -> Dict[str, Any]:
+    import os
+    import subprocess
+    if os.name != "nt":
+        return {"ok": True, "procs": [], "note": "proc list is Windows-oriented"}
+    try:
+        # Use tasklist CSV — no shell inject of agent input
+        completed = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        rows = []
+        import csv
+        import io as _io
+        reader = csv.reader(_io.StringIO(completed.stdout or ""))
+        for row in reader:
+            if len(row) < 2:
+                continue
+            name, pid_s = row[0], row[1]
+            try:
+                pid = int(pid_s)
+            except ValueError:
+                continue
+            rows.append({"pid": pid, "name": name})
+            if len(rows) >= max_items:
+                break
+        return {"ok": True, "procs": rows, "count": len(rows)}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _kill_proc(pid: int) -> Dict[str, Any]:
+    import os
+    import subprocess
+    if pid <= 0:
+        return {"ok": False, "error": "invalid pid"}
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            ok = completed.returncode == 0
+            return {
+                "ok": ok,
+                "pid": pid,
+                "stdout": (completed.stdout or "").strip()[:500],
+                "stderr": (completed.stderr or "").strip()[:500],
+            }
+        os.kill(pid, 9)
+        return {"ok": True, "pid": pid}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "pid": pid}
+
+
+def _files_list(path: str, max_items: int = 200) -> Dict[str, Any]:
+    root = Path(path).expanduser()
+    if not root.exists():
+        return {"ok": False, "error": f"path not found: {root}"}
+    if not root.is_dir():
+        return {"ok": False, "error": f"not a directory: {root}"}
+    items = []
+    try:
+        for entry in root.iterdir():
+            try:
+                st = entry.stat()
+                items.append({
+                    "name": entry.name,
+                    "path": str(entry),
+                    "is_dir": entry.is_dir(),
+                    "size": int(st.st_size) if entry.is_file() else None,
+                })
+            except OSError:
+                continue
+            if len(items) >= max_items:
+                break
+        items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+        return {"ok": True, "path": str(root), "entries": items, "count": len(items), "capped": len(items) >= max_items}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _clipboard_image_save(path: str) -> Dict[str, Any]:
+    out = Path(path)
+    try:
+        from PIL import ImageGrab
+        img = ImageGrab.grabclipboard()
+        if img is None:
+            return {"ok": False, "error": "clipboard has no image"}
+        if isinstance(img, list):
+            return {"ok": False, "error": "clipboard has file list, not image"}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        img.save(str(out))
+        return {"ok": True, "path": str(out), "size": list(img.size)}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _notify_toast(title: str, body: str) -> Dict[str, Any]:
+    """Show a real Windows toast/balloon (BurntToast → WinRT → NotifyIcon)."""
+    import os
+    import subprocess
+    if os.name != "nt":
+        return {"ok": False, "error": "notify is Windows-only"}
+
+    def _esc_xml(s: str) -> str:
+        return (
+            s.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+        )
+
+    t_ps = title.replace("'", "''")
+    b_ps = body.replace("'", "''")
+    t_xml = _esc_xml(title)
+    b_xml = _esc_xml(body)
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+    burnt = (
+        "if (Get-Module -ListAvailable -Name BurntToast) { "
+        f"New-BurntToastNotification -Text '{t_ps}', '{b_ps}'; Write-Output 'burnttoast' "
+        "} else { exit 2 }"
+    )
+    winrt = (
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
+        "ContentType = WindowsRuntime] | Out-Null; "
+        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, "
+        "ContentType = WindowsRuntime] | Out-Null; "
+        "$template = @'\n"
+        "<toast><visual><binding template=\"ToastGeneric\">"
+        f"<text>{t_xml}</text><text>{b_xml}</text>"
+        "</binding></visual></toast>\n"
+        "'@; "
+        "$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; $xml.LoadXml($template); "
+        "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml); "
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Aether').Show($toast); "
+        "Write-Output 'winrt'"
+    )
+    balloon = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        "$n = New-Object System.Windows.Forms.NotifyIcon; "
+        "$n.Icon = [System.Drawing.SystemIcons]::Information; "
+        "$n.Visible = $true; "
+        f"$n.ShowBalloonTip(4000, '{t_ps}', '{b_ps}', "
+        "[System.Windows.Forms.ToolTipIcon]::Info); "
+        "Start-Sleep -Seconds 2; $n.Dispose(); Write-Output 'notifyicon'"
+    )
+
+    last_err = None
+    for method, ps in (("burnttoast", burnt), ("winrt", winrt), ("notifyicon", balloon)):
+        try:
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, text=True, timeout=30, creationflags=creationflags,
+            )
+            out = (proc.stdout or "").strip()
+            if proc.returncode == 0 and method in out:
+                return {"ok": True, "title": title, "body": body, "queued": True, "method": method}
+            last_err = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()
+        except Exception as exc:
+            last_err = f"{type(exc).__name__}: {exc}"
+    return {"ok": False, "error": last_err or "notify failed"}
+
+
+def _wait_window(ctrl: Any, step: Dict[str, Any]) -> Dict[str, Any]:
+    """Poll until a window matching title substring and/or pid appears."""
+    import time as _time
+    title = step.get("title_contains") or step.get("title") or step.get("name") or step.get("query")
+    pid = step.get("pid")
+    timeout = min(MAX_WAIT_SECONDS, float(step.get("timeout", 15.0)))
+    poll = max(0.05, float(step.get("poll", 0.25)))
+    if title is None and pid is None:
+        return {"ok": False, "error": "wait_window requires title or pid"}
+    t0 = _time.time()
+    needle = str(title).lower() if title is not None else None
+    want_pid = None
+    if pid is not None:
+        try:
+            want_pid = int(pid)
+        except Exception:
+            return {"ok": False, "error": "pid must be int"}
+    last_windows: List[Dict[str, Any]] = []
+    while _time.time() - t0 < timeout:
+        try:
+            windows = ctrl.list_windows() if hasattr(ctrl, "list_windows") else []
+        except Exception:
+            windows = []
+        last_windows = windows if isinstance(windows, list) else []
+        for w in last_windows:
+            wpid = w.get("pid") or w.get("process_id")
+            try:
+                wpid_i = int(wpid) if wpid is not None else None
+            except Exception:
+                wpid_i = None
+            wt = str(w.get("title") or w.get("name") or "").lower()
+            pid_ok = want_pid is None or wpid_i == want_pid
+            title_ok = needle is None or (needle in wt)
+            if pid_ok and title_ok:
+                return {
+                    "ok": True,
+                    "title": w.get("title") or w.get("name"),
+                    "pid": wpid_i,
+                    "window_id": w.get("window_id") or w.get("handle"),
+                    "elapsed": round(_time.time() - t0, 3),
+                }
+        _time.sleep(poll)
+    return {
+        "ok": False,
+        "error": "window not found",
+        "title": title,
+        "pid": want_pid,
+        "elapsed": round(_time.time() - t0, 3),
+        "windows": last_windows[:12],
+    }
+
+
+def _desktop_op(step: Dict[str, Any]) -> Dict[str, Any]:
+    """Virtual desktop list/switch — best-effort via optional pyvda."""
+    action = str(step.get("action") or "list").lower()
+    try:
+        import pyvda  # type: ignore
+    except Exception:
+        return {"ok": False, "error": "unsupported", "detail": "pyvda not installed"}
+    try:
+        desktops = list(pyvda.get_virtual_desktops())
+        current = pyvda.current_virtual_desktop()
+        if action == "list":
+            return {
+                "ok": True,
+                "action": "list",
+                "current": getattr(current, "number", None),
+                "desktops": [
+                    {"number": getattr(d, "number", i + 1), "name": str(getattr(d, "name", "") or "")}
+                    for i, d in enumerate(desktops)
+                ],
+            }
+        if action in {"switch", "goto", "set"}:
+            target = step.get("number") or step.get("index") or step.get("desktop")
+            if target is None:
+                return {"ok": False, "error": "desktop switch requires number"}
+            num = int(target)
+            for d in desktops:
+                if int(getattr(d, "number", -1)) == num:
+                    d.go()
+                    return {"ok": True, "action": "switch", "number": num}
+            if 1 <= num <= len(desktops):
+                desktops[num - 1].go()
+                return {"ok": True, "action": "switch", "number": num}
+            return {"ok": False, "error": f"desktop {num} not found"}
+        return {"ok": False, "error": f"unknown desktop action: {action}"}
+    except Exception as exc:
+        return {"ok": False, "error": "unsupported", "detail": str(exc)}

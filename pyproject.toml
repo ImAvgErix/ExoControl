@@ -1,0 +1,35 @@
+[project]
+name = "exo-control"
+version = "0.1.0"
+description = "Exo Control - realtime PC control for any AI harness (MCP + CLI + Python)."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mss>=9.0.0",
+    "pynput>=1.7.6",
+    "pyautogui>=0.9.54",
+    "Pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "mcp>=1.0.0",
+    "playwright>=1.40.0",
+]
+
+[project.optional-dependencies]
+ocr = ["pytesseract", "easyocr"]
+agent = ["openai"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[project.scripts]
+aether = "aether.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ImAvgErix/exo-control"
+Repository = "https://github.com/ImAvgErix/exo-control"
+

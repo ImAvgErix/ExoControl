@@ -1,0 +1,5 @@
+[
+  { "op": "windows" },
+  { "op": "status" },
+  { "op": "stats" }
+]
