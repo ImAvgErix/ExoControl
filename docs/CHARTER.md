@@ -60,6 +60,8 @@ Ship against **`docs/JARVIS-OS.md`**: Floor (Jarvis + Plus P0) + Jarvis OS P0 (e
 - Ship with `SECURITY.md` hard stops + alpha badge until Jarvis OS Floor+P0 are stamped.
 - If extract is messy for >1 week, keep the repo **private only for the extract PR window**, then flip public — do not stay private as a product strategy.
 
+**ANNOUNCE-GA CLEARED 2026-08-11** by Product (v0.1).
+
 ## Packaging outcomes (Definition of Ready to announce)
 - [x] Repo `ImAvgErix/ExoControl` with this charter + SECURITY.md + JARVIS-OS.md
 - [x] MCP + CLI + Python SDK install paths documented

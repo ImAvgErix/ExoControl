@@ -11,7 +11,7 @@
 Open a private security advisory on this repo, or contact the maintainer (ImAvgErix) via GitHub.
 
 ## Alpha
-Jarvis OS stamped 2026-08-11. Announce-GA still requires charter DoR (rename + hard-stop tests). Formerly: alpha until Product stamps **Jarvis OS** (Floor + all P0 in `docs/JARVIS-OS.md`). Expect breaking API changes during extract/rename.
+Jarvis OS stamped 2026-08-11. Announce-GA cleared 2026-08-11 for v0.1. Prefer exo_control; aether.* transitional. Formerly: alpha until Product stamps **Jarvis OS** (Floor + all P0 in `docs/JARVIS-OS.md`). Expect breaking API changes during extract/rename.
 
 ## Lease model
 Desktop hands require an acquired lease. Agents share the machine; they do not own it. Force-release is audited.
