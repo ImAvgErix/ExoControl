@@ -21,12 +21,12 @@ Repo: [ImAvgErix/ExoControl](https://github.com/ImAvgErix/ExoControl). Related a
 
 ## Install
 
-`ash
+```bash
 git clone https://github.com/ImAvgErix/ExoControl.git
 cd ExoControl
 pip install -e .
 playwright install chromium
-`
+```
 
 Import path is still ether.* during the rename (do not invent an xo_control Python API yet). CLI entry points: xo-control and ether.
 
@@ -34,7 +34,7 @@ Import path is still ether.* during the rename (do not invent an xo_control Py
 
 Add to your Cursor MCP config (mcp.json or Cursor Settings → MCP):
 
-`json
+```json
 {
   "mcpServers": {
     "exo-control": {
@@ -43,7 +43,7 @@ Add to your Cursor MCP config (mcp.json or Cursor Settings → MCP):
     }
   }
 }
-`
+```
 
 Use a venv/python that has this package installed. Prefer one batched ether_exec script over chatty single clicks.
 
@@ -51,7 +51,7 @@ Use a venv/python that has this package installed. Prefer one batched ether_exe
 
 Same server in Claude Desktop config (claude_desktop_config.json):
 
-`json
+```json
 {
   "mcpServers": {
     "exo-control": {
@@ -60,25 +60,25 @@ Same server in Claude Desktop config (claude_desktop_config.json):
     }
   }
 }
-`
+```
 
 Restart Claude Desktop after editing. Point command at the interpreter that has the package installed if python is ambiguous.
 
 ## CLI
 
-`ash
+```bash
 exo-control --help
 aether --help
 aether windows
 aether lease status
 aether script steps.json
-`
+```
 
 Equivalent: python -m aether.cli ….
 
 ## Python
 
-`python
+```python
 from aether.exec_engine import AetherExecEngine
 
 eng = AetherExecEngine()
@@ -89,7 +89,7 @@ eng.execute([
     {"op": "type", "text": "hello from exo-control"},
     {"op": "lease_release"},
 ])
-`
+```
 
 ## Safety
 
