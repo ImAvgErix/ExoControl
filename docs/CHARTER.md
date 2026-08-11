@@ -61,12 +61,12 @@ Ship against **`docs/JARVIS-OS.md`**: Floor (Jarvis + Plus P0) + Jarvis OS P0 (e
 - If extract is messy for >1 week, keep the repo **private only for the extract PR window**, then flip public — do not stay private as a product strategy.
 
 ## Packaging outcomes (Definition of Ready to announce)
-- [ ] Repo `ImAvgErix/ExoControl` with this charter + SECURITY.md + JARVIS-OS.md
+- [x] Repo `ImAvgErix/ExoControl` with this charter + SECURITY.md + JARVIS-OS.md
 - [x] MCP + CLI + Python SDK install paths documented
 - [ ] aether-driver extracted/rebranded; no broken ExoLauncher dependency for core ops
 - [ ] Jarvis OS Floor + P0 [x] (Product stamp)
 - [ ] Hard stops tested (confirm gates, anti-cheat deny, compact caps)
-- [ ] `exo-control` CLI entry point wired in packaging (alongside or replacing legacy `aether`)
+- [x] `exo-control` CLI entry point wired in packaging (alongside or replacing legacy `aether`)
 
 ## One-line pitch
 **Exo Control — realtime PC eyes and hands for any AI agent. Compact. Leased. Honest.**
