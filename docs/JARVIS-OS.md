@@ -17,7 +17,7 @@ Source: Product via General (Eric). Stamp name: **Jarvis OS**.
   - **PROVE**
 - [x] **Batched exec:** a 6+ step workflow runs in **one** `aether_exec` (one MCP round-trip); mid-script state (lease, CDP, focus) sticks
   - **PROVE**
-- [ ] **Ref-stable acts:** click/type/fill accept compact refs from the prior observe/snapshot in the same script (no re-sending prose descriptions)
+- [x] **Ref-stable acts:** click/type/fill accept compact refs from the prior observe/snapshot in the same script (no re-sending prose descriptions)
   - **CODE** + **PROVE**
 - [x] **Budget gate:** Exo compact_observe p95 < 300ms and p95 payload < cap over 50 warm calls
   - **PROVE** (+ **CODE** if over)
@@ -42,11 +42,11 @@ Source: Product via General (Eric). Stamp name: **Jarvis OS**.
 
 ## P0 — Files
 
-- [ ] `files_list` / read text / write text / copy / move / delete under an allowrooted agent workspace; paths outside roots require `confirm=true`
+- [x] `files_list` / read text / write text / copy / move / delete under an allowrooted agent workspace; paths outside roots require `confirm=true`
   - **CODE** + **PROVE**
-- [ ] Open file via shell (`open_path`) and verify window or honest fail
+- [x] Open file via shell (`open_path`) and verify window or honest fail
   - **PROVE**
-- [ ] No recursive wipe / `rm -rf` equivalent without confirm; deny leaves audit line
+- [x] No recursive wipe / `rm -rf` equivalent without confirm; deny leaves audit line
   - **CODE** + **PROVE**
 
 ## P0 — Registry
