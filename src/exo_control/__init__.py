@@ -31,8 +31,6 @@ _SUBMODULES = (
     "infra_ops",
     "smart",
     "safety",
-    "cli",
-    "slim_mcp_server",
     "desktop_lease",
     "clipboard",
     "config",
