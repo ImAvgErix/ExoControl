@@ -29,8 +29,10 @@ where = ["src"]
 [project.scripts]
 aether = "aether.cli:main"
 
+exo-control = "aether.cli:main"
 [project.urls]
 Homepage = "https://github.com/ImAvgErix/ExoControl"
 Repository = "https://github.com/ImAvgErix/ExoControl"
+
 
 

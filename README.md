@@ -1,61 +1,102 @@
 # Exo Control
 
-Realtime PC control for **any AI harness** — Cursor, Claude, Codex, custom agents, scripts.
+Harness-agnostic realtime PC control for AI agents: desktop (UIA), browser (DOM/CDP), files, registry, and OS infrastructure.
 
-Desktop (UIA) + browser (DOM/CDP) + files + registry + OS infrastructure.
-Elite token efficiency: compact refs by default, batched exec, no screenshot spam.
+Works with any MCP host (Cursor, Claude Desktop, …), the CLI, or the Python SDK. Compact refs by default, batched exec, screenshots only on ask or structure miss.
 
-Capability bar: see docs/JARVIS-OS.md (Jarvis OS).
-Related app: https://github.com/ImAvgErix/ExoLauncher (separate repo).
+**Pitch:** realtime PC eyes and hands for any AI agent. Compact. Leased. Honest.
+
+**Capability bar:** [docs/JARVIS-OS.md](docs/JARVIS-OS.md) (Jarvis OS). Product clears when Floor + all P0 are [x].
+
+Related app: [ExoLauncher](https://github.com/ImAvgErix/ExoLauncher) (separate repo).
+
+## Requirements
+
+- Windows (primary today)
+- Python 3.10+
 
 ## Install
 
+`ash
+git clone https://github.com/ImAvgErix/ExoControl.git
+cd ExoControl
 pip install -e .
 playwright install chromium
+`
 
-Windows today (primary). Python 3.10+.
+Import path is still ether.* during the rename. Installed CLI entry point: ether (and xo-control once the scripts entry is wired).
 
-## MCP (any MCP host)
+## Cursor (MCP)
 
+Add to your Cursor MCP config (mcp.json or Cursor Settings → MCP):
+
+`json
 {
-  "mcpServers": {
-    "exo-control": {
-      "command": "python",
-      "args": ["-m", "aether.slim_mcp_server"]
+  \"mcpServers\": {
+    \"exo-control\": {
+      \"command\": \"python\",
+      \"args\": [\"-m\", \"aether.slim_mcp_server\"]
     }
   }
 }
+`
 
-Prefer batched script ops over chatty single clicks.
+Use a venv/python that has this package installed. Prefer one batched ether_exec script over chatty single clicks.
+
+## Claude Desktop (MCP)
+
+Same server; put it in Claude Desktop’s config (claude_desktop_config.json):
+
+`json
+{
+  \"mcpServers\": {
+    \"exo-control\": {
+      \"command\": \"python\",
+      \"args\": [\"-m\", \"aether.slim_mcp_server\"]
+    }
+  }
+}
+`
+
+Restart Claude Desktop after editing. Point command at the interpreter that has the package installed if python is ambiguous.
 
 ## CLI
 
-exo-control --help
+`ash
 aether --help
+aether windows
+aether lease status
+aether script steps.json
+`
+
+Equivalent: python -m aether.cli ….
 
 ## Python
 
+`python
 from aether.exec_engine import AetherExecEngine
+
 eng = AetherExecEngine()
 eng.execute([
-    {"op": "lease_acquire", "agent_id": "my-agent", "task": "demo", "ttl_sec": 120},
-    {"op": "launch", "name": "notepad"},
-    {"op": "wait_window", "title_contains": "Notepad", "timeout": 10},
-    {"op": "type", "text": "hello from exo-control"},
-    {"op": "lease_release"},
+    {\"op\": \"lease_acquire\", \"agent_id\": \"my-agent\", \"task\": \"demo\", \"ttl_sec\": 120},
+    {\"op\": \"launch\", \"name\": \"notepad\"},
+    {\"op\": \"wait_window\", \"title_contains\": \"Notepad\", \"timeout\": 10},
+    {\"op\": \"type\", \"text\": \"hello from exo-control\"},
+    {\"op\": \"lease_release\"},
 ])
+`
 
 ## Safety
 
-- Desktop lease (one agent holds hands)
-- Destructive / kill / registry write / service mutate need confirm=true
-- No anti-cheat tampering, credential dumping, or silent elevation
+- Desktop lease: one agent holds the hands at a time
+- Destructive / kill / registry write / service mutate require confirm=true
+- Hard denies: anti-cheat tampering, credential dumping, silent elevation
+- See [SECURITY.md](SECURITY.md)
 
 ## Status
 
-Bootstrap from former local aether-driver (v1.8 lineage). Import path still aether.* during rename; CLI: exo-control and aether.
+Bootstrap from former local aether-driver (v1.8 lineage). Package name xo-control; modules/CLI still ether until rename completes. **Alpha** until Jarvis OS is stamped.
 
 ## License
 
 MIT
-
