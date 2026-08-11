@@ -30,6 +30,7 @@ where = ["src"]
 aether = "aether.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ImAvgErix/exo-control"
-Repository = "https://github.com/ImAvgErix/exo-control"
+Homepage = "https://github.com/ImAvgErix/ExoControl"
+Repository = "https://github.com/ImAvgErix/ExoControl"
+
 
