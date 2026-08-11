@@ -37,7 +37,7 @@ Source: Product via General (Eric). Stamp name: **Jarvis OS**.
   - **PROVE**
 - [x] Exo DOM loop: Settings → Library → search → clear/back in one exec, zero UIA/OCR
   - **PROVE** (honesty vs Plus note)
-- [ ] Structure miss → one bounded retry → then optional screenshot; never screenshot-first
+- [x] Structure miss → one bounded retry → then optional screenshot; never screenshot-first
   - **CODE** + **PROVE**
 
 ## P0 — Files
