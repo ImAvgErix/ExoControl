@@ -7,7 +7,7 @@ One page. Capability bar: **Jarvis OS** (`aether-driver` → this product). Sour
 - **GitHub:** `ImAvgErix/ExoControl` (match ExoHub / ExoOS / ExoLink PascalCase)
 - **PyPI / CLI:** `exo-control` (package + CLI entry point)
 - Working name "Exo Control" stays; do **not** ship as `aether-driver` publicly
-- Import path remains `aether.*` until rename; do not invent an `exo_control` Python API yet
+- Dual package for v0.1: `aether.*` stays stable; preferred new import is `exo_control` (re-exports, including submodules)
 
 ## Positioning
 Realtime **desktop / browser / files / registry / OS** control for **any** agent harness — Cursor, Claude, Codex, custom — via:
@@ -39,7 +39,7 @@ Exo is a first-class target, not the only one. Control must not require Exo to b
 |---------|------|
 | **MCP** | `python -m aether.slim_mcp_server` (Cursor + Claude Desktop JSON in README) |
 | **CLI** | `exo-control` |
-| **Python** | `pip install -e .` then `from aether.exec_engine import AetherExecEngine` |
+| **Python** | `pip install -e .` then `from exo_control.exec_engine import AetherExecEngine` (or `aether.*`) |
 | **Repo** | https://github.com/ImAvgErix/ExoControl |
 
 ## Non-goals
@@ -63,9 +63,9 @@ Ship against **`docs/JARVIS-OS.md`**: Floor (Jarvis + Plus P0) + Jarvis OS P0 (e
 ## Packaging outcomes (Definition of Ready to announce)
 - [x] Repo `ImAvgErix/ExoControl` with this charter + SECURITY.md + JARVIS-OS.md
 - [x] MCP + CLI + Python SDK install paths documented
-- [ ] aether-driver extracted/rebranded; no broken ExoLauncher dependency for core ops
+- [x] aether-driver extracted/rebranded as ExoControl; dual `aether`/`exo_control` packages; core ops do not require ExoLauncher
 - [x] Jarvis OS Floor + P0 [x] (Product stamp)
-- [ ] Hard stops tested (confirm gates, anti-cheat deny, compact caps)
+- [x] Hard stops tested (confirm gates, anti-cheat deny, compact caps) — `tests/test_hard_stops.py`
 - [x] `exo-control` CLI entry point wired in packaging (alongside or replacing legacy `aether`)
 
 ## One-line pitch
