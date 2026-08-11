@@ -276,6 +276,25 @@ class BrowserEngine:
         title = await space.page.title()
         return {"ok": True, "url": space.page.url, "title": title, "space_id": space.id}
 
+    async def screenshot(self, space_id: Optional[str] = None) -> Dict[str, Any]:
+        """Return a PNG screenshot for the space (optional structure-miss path)."""
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        page = space.page
+        try:
+            import base64
+            png = await page.screenshot(full_page=False, type="png")
+            b64 = base64.b64encode(png).decode("ascii")
+            return {
+                "ok": True,
+                "space_id": space.id,
+                "url": page.url,
+                "screenshot_base64": b64,
+                "bytes": len(png),
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e), "space_id": getattr(space, "id", space_id)}
+
     async def snapshot(
         self,
         space_id: Optional[str] = None,

@@ -503,11 +503,20 @@ class AetherExecEngine:
             retry = dict(retry)
             retry["structure_miss_retry"] = True
             retry["snapshot"] = snap_compact
-            if step.get("screenshot_on_miss") and hasattr(browser, "screenshot"):
+            if step.get("screenshot_on_miss"):
                 try:
-                    retry["miss_screenshot"] = browser.screenshot(step.get("space_id"))
-                except Exception:
-                    pass
+                    if hasattr(browser, "screenshot"):
+                        shot = browser.screenshot(step.get("space_id"))
+                    else:
+                        shot = browser.snapshot(step.get("space_id"), True)
+                    retry["miss_screenshot"] = shot
+                    if isinstance(shot, dict):
+                        b64 = shot.get("screenshot_base64")
+                        if b64:
+                            # Explicit top-level key for proves (not stripped by compact snapshot)
+                            retry["screenshot_base64"] = b64
+                except Exception as exc:
+                    retry["miss_screenshot_error"] = f"{type(exc).__name__}: {exc}"
         return retry
 
     def _observe_budget(self, step: Dict[str, Any]) -> Dict[str, Any]:
