@@ -114,30 +114,104 @@ class BrowserEngine:
             await self.start()
 
 
-    async def connect_cdp(self, endpoint: str = "http://127.0.0.1:9222") -> Dict[str, Any]:
-        """
-        Attach to an already-running Chrome/Edge launched with --remote-debugging-port=9222.
-        This reuses the user's real profile/logins (far better than a blank automated browser).
-        Example launch:
-          chrome --remote-debugging-port=9222
-          msedge --remote-debugging-port=9222
-        """
+    async def _select_cdp_page(self, pages, page_url=None, page_title=None):
+        """Prefer Exo / filter match; never silently bind about:blank when a better page exists."""
+        if not pages:
+            return None, []
+        url_f = (page_url or "").strip().lower()
+        title_f = (page_title or "").strip().lower()
+        ranked = []
+        for p in pages:
+            try:
+                url = (p.url or "").lower()
+            except Exception:
+                url = ""
+            try:
+                title = ((await p.title()) or "").lower()
+            except Exception:
+                title = ""
+            score = 0
+            reasons = []
+            if url_f and url_f in url:
+                score += 1000
+                reasons.append("url_filter")
+            if title_f and title_f in title:
+                score += 900
+                reasons.append("title_filter")
+            elif url_f or title_f:
+                # explicit filter present but this page missed — demote hard
+                score -= 500
+                reasons.append("filter_miss")
+            if "app.exo-launcher.local" in url:
+                score += 80
+                reasons.append("exo_url")
+            if "exo launcher" in title:
+                score += 70
+                reasons.append("exo_title")
+            if url.startswith("http://") or url.startswith("https://"):
+                if "example.com" not in url:
+                    score += 10
+            if url.startswith("about:blank") or url == "about:blank":
+                score -= 100
+                reasons.append("blank")
+            if "example.com" in url:
+                score -= 50
+                reasons.append("example")
+            ranked.append((score, p, url, title, reasons))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        meta = [
+            {"url": u, "title": t, "score": s, "reasons": r}
+            for s, _p, u, t, r in ranked[:8]
+        ]
+        return ranked[0][1], meta
+
+    async def connect_cdp(
+        self,
+        endpoint: str = "http://127.0.0.1:9222",
+        page_url: Optional[str] = None,
+        page_title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Attach to running Chromium/WebView2 debug port; bind Exo page by default."""
         if not HAS_PLAYWRIGHT:
             return {"ok": False, "error": "playwright missing"}
         if self._pw is None:
             self._pw = await async_playwright().start()
         try:
             browser = await self._pw.chromium.connect_over_cdp(endpoint)
+            self._cdp_browser = browser
             self._browser = browser.contexts[0] if browser.contexts else await browser.new_context()
             self._started = True
-            pages = self._browser.pages
-            page = pages[0] if pages else await self._browser.new_page()
+            self._cdp_mode = True
+            pages = list(self._browser.pages)
+            page, meta = await self._select_cdp_page(
+                pages, page_url=page_url, page_title=page_title
+            )
+            if page is None:
+                page = await self._browser.new_page()
+                meta = []
             sid = "cdp-default"
             self._spaces[sid] = Space(id=sid, name="cdp-default", context=self._browser, page=page)
             self._default_space_id = sid
-            return {"ok": True, "endpoint": endpoint, "space_id": sid, "pages": len(pages)}
+            try:
+                bound_url = page.url
+                bound_title = await page.title()
+            except Exception:
+                bound_url, bound_title = "", ""
+            return {
+                "ok": True,
+                "endpoint": endpoint,
+                "space_id": sid,
+                "pages": len(pages),
+                "bound_url": bound_url,
+                "bound_title": bound_title,
+                "page_pick": meta,
+                "page_url": page_url,
+                "page_title": page_title,
+                "browser_runtime": "sticky-loop-v1",
+                "sticky_loop": True,
+            }
         except Exception as e:
-            return {"ok": False, "error": str(e), "hint": "Start Chrome with --remote-debugging-port=9222"}
+            return {"ok": False, "error": str(e), "hint": "Ensure remote debugging port is listening"}
 
     async def list_spaces(self) -> List[Dict[str, Any]]:
         await self.ensure_started()
@@ -154,13 +228,40 @@ class BrowserEngine:
             out.append({"id": s.id, "name": s.name, "url": url, "title": title})
         return out
 
-    async def create_space(self, name: Optional[str] = None) -> str:
+    async def create_space(
+        self,
+        name: Optional[str] = None,
+        url: Optional[str] = None,
+        external: Optional[bool] = None,
+    ) -> str:
+        """Create a space. When attached via WebView2 debug, external URLs use a
+        separate Chromium browser so leftover pages do not pollute the Exo context.
+        """
         await self.ensure_started()
         sid = str(uuid.uuid4())[:8]
         name = name or f"space-{sid}"
+        use_external = external
+        if use_external is None:
+            use_external = bool(getattr(self, '_cdp_mode', False))
+        if use_external:
+            if self._pw is None:
+                self._pw = await async_playwright().start()
+            ext = getattr(self, "_external_browser", None)
+            if ext is None:
+                ext = await self._pw.chromium.launch(headless=False)
+                self._external_browser = ext
+            ctx = await ext.new_context()
+            page = await ctx.new_page()
+            if url:
+                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            self._spaces[sid] = Space(id=sid, name=name, context=ctx, page=page)
+            return sid
         page = await self._browser.new_page()
+        if url:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         self._spaces[sid] = Space(id=sid, name=name, context=self._browser, page=page)
         return sid
+
 
     def _get_space(self, space_id: Optional[str] = None) -> Space:
         sid = space_id or self._default_space_id
@@ -578,20 +679,30 @@ class BrowserEngineSync:
     def start(self):
         return self._run(self._engine.start())
 
-    def connect_cdp(self, endpoint: str = "http://127.0.0.1:9222"):
-        """Attach to Chrome/Edge/WebView2 remote debugging (e.g. port 9229)."""
-        out = self._run(self._engine.connect_cdp(endpoint))
-        if isinstance(out, dict):
-            out = dict(out)
-            out["browser_runtime"] = STICKY_LOOP_BUILD
-            out["sticky_loop"] = True
-        return out
+    def connect_cdp(
+        self,
+        endpoint: str = "http://127.0.0.1:9222",
+        page_url: Optional[str] = None,
+        page_title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._run(
+            self._engine.connect_cdp(endpoint, page_url=page_url, page_title=page_title)
+        )
+
 
     def list_spaces(self):
         return self._run(self._engine.list_spaces())
 
-    def create_space(self, name: Optional[str] = None):
-        return self._run(self._engine.create_space(name))
+    def create_space(
+        self,
+        name: Optional[str] = None,
+        url: Optional[str] = None,
+        external: Optional[bool] = None,
+    ):
+        return self._run(
+            self._engine.create_space(name=name, url=url, external=external)
+        )
+
 
     def navigate(self, url: str, space_id: Optional[str] = None, wait: str = "domcontentloaded"):
         return self._run(self._engine.navigate(url, space_id, wait))

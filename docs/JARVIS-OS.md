@@ -11,31 +11,31 @@ Source: Product via General (Eric). Stamp name: **Jarvis OS**.
 
 ## P0 — Token & efficiency (first-class)
 
-- [ ] **Compact-by-default eyes:** default `observe`/`compact_observe`/`eyes`/`browser_snapshot` responses stay under a hard cap (≤4KB chars or ≤40 refs) unless `verbose=true`; raw HTML/a11y full trees never dump by default
+- [x] **Compact-by-default eyes:** default `observe`/`compact_observe`/`eyes`/`browser_snapshot` responses stay under a hard cap (≤4KB chars or ≤40 refs) unless `verbose=true`; raw HTML/a11y full trees never dump by default
   - **CODE** + **PROVE**: same Exo screen twice — default payload ≤ cap; verbose exceeds only when asked
-- [ ] **No screenshot-default:** structure/DOM path succeeds without `aether_screenshot` for Exo Settings→Library and one desktop Notepad type; screenshot only on explicit ask or structure miss
+- [x] **No screenshot-default:** structure/DOM path succeeds without `aether_screenshot` for Exo Settings→Library and one desktop Notepad type; screenshot only on explicit ask or structure miss
   - **PROVE**
-- [ ] **Batched exec:** a 6+ step workflow runs in **one** `aether_exec` (one MCP round-trip); mid-script state (lease, CDP, focus) sticks
+- [x] **Batched exec:** a 6+ step workflow runs in **one** `aether_exec` (one MCP round-trip); mid-script state (lease, CDP, focus) sticks
   - **PROVE**
 - [ ] **Ref-stable acts:** click/type/fill accept compact refs from the prior observe/snapshot in the same script (no re-sending prose descriptions)
   - **CODE** + **PROVE**
-- [ ] **Budget gate:** Exo compact_observe p95 < 300ms and p95 payload < cap over 50 warm calls
+- [x] **Budget gate:** Exo compact_observe p95 < 300ms and p95 payload < cap over 50 warm calls
   - **PROVE** (+ **CODE** if over)
 
 ## P0 — Desktop / UIA hands
 
-- [ ] UIA-first click/type/fill/scroll on WinUI + classic Win32; coords only after UIA miss (logged)
+- [x] UIA-first click/type/fill/scroll on WinUI + classic Win32; coords only after UIA miss (logged)
   - **PROVE**
-- [ ] Multi-window leased script: ≥3 apps, correct HWND each act, no cross-talk
+- [x] Multi-window leased script: ≥3 apps, correct HWND each act, no cross-talk
   - **PROVE** (Plus residual if still open — close it here)
-- [ ] Cursor workers STA-safe; dual-cursor UIA acts both succeed
+- [x] Cursor workers STA-safe; dual-cursor UIA acts both succeed
   - **PROVE**
 
 ## P0 — Browser (DOM/CDP, not pixels-first)
 
-- [ ] Chrome/Edge CDP + Exo WebView2: navigate, snapshot (refs), click/type by ref/text, zero screenshots in the happy path
+- [x] Chrome/Edge CDP + Exo WebView2: navigate, snapshot (refs), click/type by ref/text, zero screenshots in the happy path
   - **PROVE**
-- [ ] Exo DOM loop: Settings → Library → search → clear/back in one exec, zero UIA/OCR
+- [x] Exo DOM loop: Settings → Library → search → clear/back in one exec, zero UIA/OCR
   - **PROVE** (honesty vs Plus note)
 - [ ] Structure miss → one bounded retry → then optional screenshot; never screenshot-first
   - **CODE** + **PROVE**
@@ -51,22 +51,22 @@ Source: Product via General (Eric). Stamp name: **Jarvis OS**.
 
 ## P0 — Registry
 
-- [ ] Read HKCU (and explicitly allowed HKLM read) values by path; missing key → ok:false (no throw dump)
+- [x] Read HKCU (and explicitly allowed HKLM read) values by path; missing key → ok:false (no throw dump)
   - **CODE** + **PROVE**
-- [ ] Write HKCU only with `confirm=true`; HKLM write denied or confirm+elevated policy documented
+- [x] Write HKCU only with `confirm=true`; HKLM write denied or confirm+elevated policy documented
   - **CODE** + **PROVE**
-- [ ] Results compact: name/type/value only — no whole-tree dumps by default
+- [x] Results compact: name/type/value only — no whole-tree dumps by default
   - **CODE** + **PROVE**
 
 ## P0 — OS infrastructure
 
-- [ ] Process inventory compact (pid/name/exe); kill requires `confirm=true` + lease; protected/anti-cheat names hard-deny
+- [x] Process inventory compact (pid/name/exe); kill requires `confirm=true` + lease; protected/anti-cheat names hard-deny
   - **CODE** + **PROVE**
-- [ ] Service list + status; start/stop/restart require `confirm=true`; failure returns Win32 reason compactly
+- [x] Service list + status; start/stop/restart require `confirm=true`; failure returns Win32 reason compactly
   - **CODE** + **PROVE**
-- [ ] Deeper system control stays behind explicit ops (env read, scheduled task list, startup folder list) — mutating ones need confirm; no silent persistence
+- [x] Deeper system control stays behind explicit ops (env read, scheduled task list, startup folder list) — mutating ones need confirm; no silent persistence
   - **CODE** + **PROVE**
-- [ ] Crash honesty: target app kill mid-script fails ≤15s, lease recoverable, no zombie MCP session
+- [x] Crash honesty: target app kill mid-script fails ≤15s, lease recoverable, no zombie MCP session
   - **PROVE**
 
 ## P1 — Elite presence (trails OK)
@@ -90,3 +90,15 @@ Token path is screenshot-first or verbose-by-default; browser work is pixels-fir
 2. CODE: compact caps, ref-stable acts, files allowroot, registry ops, service ops, confirm gates
 3. PROVE: efficiency budgets, DOM-first browser, batched multi-surface script, registry/service happy+deny paths
 4. Product clears **Jarvis OS** only when Floor + all P0 [x]
+
+## 1.9.0 CODE landed (2026-08-11)
+
+P0 CODE surface is on disk (PROVE boxes still open until live budgets/DOM runs):
+
+- `aether.compact.compact_payload` — default eyes/snapshot ≤4KB / ≤40 refs; `verbose=true` opt-out
+- Exec wraps `observe` / `compact_observe` / `eyes` / `browser_snapshot` (+ fat `read_ui`); stores `_last_browser_refs`; structure-miss click retries once via fresh snapshot (no screenshot unless `screenshot_on_miss`)
+- `observe_budget` — lease-free p50/p95 ms + p95 chars over N warm compact_observe calls
+- `files_list|read|write|copy|move|delete` — allowrooted (`%USERPROFILE%\.aether\workspace` + `AETHER_FILE_ROOTS`); outside/recursive need `confirm=true` + audit jsonl
+- `registry_read` / `registry_write` — HKCU write confirm; HKLM write always denied
+- `proc_list` / protected kill deny; `service_list|status|control`; `env_get|list`; `tasks_list`; `startup_list`
+

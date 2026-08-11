@@ -94,3 +94,10 @@ aether lease release --token TOKEN
 - `browser_click` / `browser_wait` — accept `text` / `name` / `query` (snapshot resolve, then click/wait). Example: `{op: browser_click, text: Settings}`.
 - `wait_window` — `{op, title?, pid?, timeout?}` polls until the window appears (lease-free).
 
+
+
+## 1.9.0 Jarvis OS CODE ops
+
+See `docs/JARVIS-OS.md`. New/extended exec ops: compact-by-default eyes, `observe_budget`,
+`files_read|write|copy|move|delete` (allowroot), `registry_read|write`, `proc_list` /
+protected kill, `service_list|status|control`, `env_get|list`, `tasks_list`, `startup_list`.

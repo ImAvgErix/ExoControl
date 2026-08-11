@@ -16,6 +16,10 @@ from typing import Any, Dict, List, Optional
 
 from aether.smart import SmartController
 from aether import desktop_lease
+from aether.compact import compact_payload, MAX_COMPACT_CHARS
+from aether import files_ops
+from aether import registry_ops
+from aether import infra_ops
 
 
 MAX_STEPS = 64
@@ -40,18 +44,26 @@ LEASE_REQUIRED_OPS = frozenset({
     "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
     "browser_press", "browser_scroll", "browser_wait", "browser_fill",
     "browser_eval", "browser_close_space",
+    "files_write", "files_copy", "files_move", "files_delete",
+    "registry_write",
+    "service_control",
+    "proc_kill",
 })
 
 # Read-only / lease-management ops (no lease required). Documented in docs/JARVIS.md.
 LEASE_FREE_OPS = frozenset({
     "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
     "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
-    "wait_cdp", "wait_for_cdp", "eyes", "apps", "files_list",
+    "wait_cdp", "wait_for_cdp", "eyes", "apps", "files_list", "files_read",
     "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
     "wait", "wait_until", "wait_gone", "wait_change", "wait_window", "verify", "verify_ui",
     "notify", "clipboard_image_save",
     "kill_switch", "arm_kill_switch", "disarm_kill_switch",
     "action_log", "log", "recent_actions",
+    "observe_budget",
+    "registry_read",
+    "proc_list", "service_list", "service_status",
+    "env_get", "env_list", "tasks_list", "startup_list",
 })
 
 
@@ -100,6 +112,7 @@ class AetherExecEngine:
         self._browser = None
         self._script_lease_token: Optional[str] = None
         self._action_log: List[Dict[str, Any]] = []
+        self._last_browser_refs: List[Any] = []
 
     def _get_browser(self):
         if self._browser is None:
@@ -196,6 +209,13 @@ class AetherExecEngine:
         if op == "desktop":
             action = str(step.get("action") or "list").lower()
             needs = action in {"switch", "goto", "set"}
+        # Read-only aliases must never require a lease even if mis-listed.
+        if op in {
+            "proc_list", "service_list", "service_status", "registry_read",
+            "files_list", "files_read", "env_get", "env_list", "tasks_list",
+            "startup_list", "observe_budget",
+        }:
+            needs = False
         if not needs:
             return None
         token = self._lease_token(step)
@@ -217,7 +237,9 @@ class AetherExecEngine:
             if op.startswith("wait") or op.startswith("verify") or op in {
                 "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
                 "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
-                "eyes", "apps", "files_list", "notify", "clipboard_image_save", "wait_window",
+                "eyes", "apps", "files_list", "files_read", "notify", "clipboard_image_save", "wait_window",
+                "observe_budget", "registry_read", "proc_list", "service_list", "service_status",
+                "env_get", "env_list", "tasks_list", "startup_list",
             }:
                 return False
         if op == "proc":
@@ -412,8 +434,124 @@ class AetherExecEngine:
                 setattr(ctrl, "_safety_prechecked", False)
             except Exception:
                 pass
+        value = self._maybe_compact_result(op, step, value)
         self._record_action(op, step, value)
         return value
+
+    def _maybe_compact_result(self, op: str, step: Dict[str, Any], value: Any) -> Any:
+        """Compact eyes/snapshot payloads unless step.verbose is True."""
+        compact_ops = {
+            "observe", "compact_observe", "eyes", "browser_snapshot", "read_ui", "read",
+        }
+        if op not in compact_ops:
+            return value
+        verbose = step.get("verbose") is True
+        if not isinstance(value, (dict, list)):
+            return value
+        # read_ui: only compact when fat
+        if op in {"read_ui", "read"} and isinstance(value, dict):
+            try:
+                import json as _json
+                raw_len = len(_json.dumps(value, default=str))
+            except Exception:
+                raw_len = MAX_COMPACT_CHARS + 1
+            if raw_len <= MAX_COMPACT_CHARS and not value.get("screenshot_base64"):
+                if verbose:
+                    return value
+                # still mark compact for consistency when under cap? Spec: wrap unless verbose.
+        return compact_payload(value, verbose=verbose)
+
+    def _browser_click_with_structure_miss(
+        self, browser: Any, step: Dict[str, Any]
+    ) -> Any:
+        """Click once; on no-match (non-verbose) refresh snapshot and retry once."""
+        click_kwargs = dict(
+            ref=step.get("ref"),
+            selector=step.get("selector"),
+            x=step.get("x"),
+            y=step.get("y"),
+            space_id=step.get("space_id"),
+            text=step.get("text") or step.get("name") or step.get("query"),
+            name=step.get("name"),
+            query=step.get("query"),
+        )
+        result = browser.click(**click_kwargs)
+        if step.get("verbose") is True:
+            return result
+        if not isinstance(result, dict) or result.get("ok") is not False:
+            return result
+        err = str(result.get("error") or "").lower()
+        no_match = (
+            "no element" in err
+            or "not found" in err
+            or "no match" in err
+            or "unknown ref" in err
+        )
+        if not no_match:
+            return result
+        # Structure-miss path: one fresh compact snapshot, then retry click once.
+        snap = browser.snapshot(step.get("space_id"), bool(step.get("include_screenshot", False)))
+        if isinstance(snap, dict) and snap.get("ok") is not False:
+            elements = snap.get("elements") or snap.get("refs") or []
+            if isinstance(elements, list):
+                self._last_browser_refs = elements
+            snap_compact = compact_payload(snap, verbose=False)
+        else:
+            snap_compact = snap
+        retry = browser.click(**click_kwargs)
+        if isinstance(retry, dict):
+            retry = dict(retry)
+            retry["structure_miss_retry"] = True
+            retry["snapshot"] = snap_compact
+            if step.get("screenshot_on_miss") and hasattr(browser, "screenshot"):
+                try:
+                    retry["miss_screenshot"] = browser.screenshot(step.get("space_id"))
+                except Exception:
+                    pass
+        return retry
+
+    def _observe_budget(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        import statistics
+        n = max(1, min(500, int(step.get("n", 50))))
+        include_ocr = bool(step.get("include_ocr", False))
+        times_ms: List[float] = []
+        chars: List[int] = []
+        ctrl = self.ctrl
+        last = None
+        for _ in range(n):
+            t0 = time.perf_counter()
+            obs = ctrl.compact_observe(include_ocr=include_ocr)
+            packed = compact_payload(obs, verbose=False)
+            elapsed = (time.perf_counter() - t0) * 1000.0
+            times_ms.append(elapsed)
+            if isinstance(packed, dict) and "_chars" in packed:
+                chars.append(int(packed["_chars"]))
+            else:
+                try:
+                    import json as _json
+                    chars.append(len(_json.dumps(packed, default=str)))
+                except Exception:
+                    chars.append(0)
+            last = packed
+        times_sorted = sorted(times_ms)
+        chars_sorted = sorted(chars)
+
+        def _pct(vals: List[float], p: float) -> float:
+            if not vals:
+                return 0.0
+            idx = min(len(vals) - 1, max(0, int(round((p / 100.0) * (len(vals) - 1)))))
+            return round(float(vals[idx]), 3)
+
+        return {
+            "ok": True,
+            "n": n,
+            "include_ocr": include_ocr,
+            "p50_ms": _pct(times_sorted, 50),
+            "p95_ms": _pct(times_sorted, 95),
+            "p95_chars": int(_pct([float(c) for c in chars_sorted], 95)),
+            "max_chars": MAX_COMPACT_CHARS,
+            "last": last,
+        }
 
     def _dispatch_step(self, op: str, step: Dict[str, Any]) -> Any:
         ctrl = self.ctrl
@@ -446,7 +584,7 @@ class AetherExecEngine:
                 max_elements=int(step.get("max_elements", 120)),
             )
         if op in {"observe", "compact_observe"}:
-            return ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", True)))
+            return ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", False)))
         if op in {"click", "smart_click"}:
             return _action_result(
                 ctrl.smart_click(
@@ -546,24 +684,24 @@ class AetherExecEngine:
 
         browser = self._get_browser() if op.startswith("browser_") else None
         if op == "browser_connect":
-            return browser.connect_cdp(step.get("endpoint", "http://127.0.0.1:9222"))
+            return browser.connect_cdp(step.get("endpoint", "http://127.0.0.1:9222"), page_url=step.get("page_url") or step.get("url_contains"), page_title=step.get("page_title") or step.get("title"))
         if op == "browser_spaces":
             return browser.list_spaces()
         if op == "browser_create_space":
-            return {"ok": True, "space_id": browser.create_space(step.get("name"))}
+            return {"ok": True, "space_id": browser.create_space(step.get("name"), url=step.get("url"), external=step.get("external"))}
         if op == "browser_navigate":
             return browser.navigate(
                 str(step.get("url", "")), step.get("space_id"), step.get("wait", "domcontentloaded")
             )
         if op == "browser_snapshot":
-            return browser.snapshot(step.get("space_id"), bool(step.get("include_screenshot", False)))
+            snap = browser.snapshot(step.get("space_id"), bool(step.get("include_screenshot", False)))
+            if isinstance(snap, dict) and snap.get("ok") is not False:
+                elements = snap.get("elements") or snap.get("refs") or []
+                if isinstance(elements, list):
+                    self._last_browser_refs = elements
+            return snap
         if op == "browser_click":
-            return browser.click(
-                step.get("ref"), step.get("selector"), step.get("x"), step.get("y"), step.get("space_id"),
-                text=step.get("text") or step.get("name") or step.get("query"),
-                name=step.get("name"),
-                query=step.get("query"),
-            )
+            return self._browser_click_with_structure_miss(browser, step)
         if op == "browser_type":
             return browser.type_text(
                 str(step.get("text", "")), step.get("ref"), step.get("selector"),
@@ -832,7 +970,7 @@ class AetherExecEngine:
             return desktop_lease.status()
 
         if op == "eyes":
-            observe = ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", True)))
+            observe = ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", False)))
             from aether import exo_bridge
             endpoints = exo_bridge.discover_cdp_endpoints(
                 extra_ports=[int(step["port"])] if step.get("port") else None
@@ -876,10 +1014,83 @@ class AetherExecEngine:
             return {"ok": False, "error": f"unknown proc action: {action}"}
 
         if op == "files_list":
-            return _files_list(
+            return files_ops.files_list(
                 path=str(step.get("path") or "."),
                 max_items=int(step.get("max", step.get("limit", 200))),
+                confirm=bool(step.get("confirm", False)),
             )
+        if op == "files_read":
+            return files_ops.files_read(
+                path=str(step.get("path") or ""),
+                max_bytes=int(step.get("max_bytes", step.get("max", 32_000))),
+                confirm=bool(step.get("confirm", False)),
+            )
+        if op == "files_write":
+            return files_ops.files_write(
+                path=str(step.get("path") or ""),
+                text=str(step.get("text", step.get("content", ""))),
+                confirm=bool(step.get("confirm", False)),
+            )
+        if op == "files_copy":
+            return files_ops.files_copy(
+                src=str(step.get("src") or step.get("from") or ""),
+                dst=str(step.get("dst") or step.get("to") or ""),
+                confirm=bool(step.get("confirm", False)),
+            )
+        if op == "files_move":
+            return files_ops.files_move(
+                src=str(step.get("src") or step.get("from") or ""),
+                dst=str(step.get("dst") or step.get("to") or ""),
+                confirm=bool(step.get("confirm", False)),
+            )
+        if op == "files_delete":
+            return files_ops.files_delete(
+                path=str(step.get("path") or ""),
+                confirm=bool(step.get("confirm", False)),
+                recursive=bool(step.get("recursive", False)),
+            )
+        if op == "registry_read":
+            return registry_ops.registry_read(
+                path=str(step.get("path") or step.get("key") or ""),
+                max_values=int(step.get("max", step.get("max_values", 40))),
+            )
+        if op == "registry_write":
+            return registry_ops.registry_write(
+                path=str(step.get("path") or step.get("key") or ""),
+                name=str(step.get("name") or step.get("value_name") or ""),
+                value=step.get("value"),
+                value_type=str(step.get("type") or step.get("value_type") or "string"),
+                confirm=bool(step.get("confirm", False)),
+            )
+        if op == "proc_list":
+            return infra_ops.proc_list(max_items=int(step.get("max", 120)))
+        if op == "proc_kill":
+            if not bool(step.get("confirm")):
+                return {"ok": False, "error": "proc kill requires confirm=true"}
+            pid = step.get("pid")
+            if pid is None:
+                return {"ok": False, "error": "proc kill requires pid"}
+            return infra_ops.kill_proc(int(pid), confirm=True)
+        if op == "service_list":
+            return infra_ops.service_list(max_items=int(step.get("max", 80)))
+        if op == "service_status":
+            return infra_ops.service_status(str(step.get("name") or step.get("service") or ""))
+        if op == "service_control":
+            return infra_ops.service_control(
+                name=str(step.get("name") or step.get("service") or ""),
+                action=str(step.get("action") or step.get("mode") or ""),
+                confirm=bool(step.get("confirm", False)),
+            )
+        if op == "env_get":
+            return infra_ops.env_get(step.get("name") or step.get("var"))
+        if op == "env_list":
+            return infra_ops.env_list(max_items=int(step.get("max", 200)))
+        if op == "tasks_list":
+            return infra_ops.tasks_list(max_items=int(step.get("max", 40)))
+        if op == "startup_list":
+            return infra_ops.startup_list(max_items=int(step.get("max", 80)))
+        if op == "observe_budget":
+            return self._observe_budget(step)
 
         if op == "clipboard_image_save":
             out_path = step.get("path") or step.get("out")
@@ -1137,54 +1348,13 @@ def _list_procs(max_items: int = 120) -> Dict[str, Any]:
 
 
 def _kill_proc(pid: int) -> Dict[str, Any]:
-    import os
-    import subprocess
-    if pid <= 0:
-        return {"ok": False, "error": "invalid pid"}
-    try:
-        if os.name == "nt":
-            completed = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True, text=True, timeout=10, check=False,
-            )
-            ok = completed.returncode == 0
-            return {
-                "ok": ok,
-                "pid": pid,
-                "stdout": (completed.stdout or "").strip()[:500],
-                "stderr": (completed.stderr or "").strip()[:500],
-            }
-        os.kill(pid, 9)
-        return {"ok": True, "pid": pid}
-    except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "pid": pid}
+    """Kill helper used by proc action=kill; hard-denies protected anti-cheat names."""
+    return infra_ops.kill_proc(int(pid), confirm=True)
 
 
-def _files_list(path: str, max_items: int = 200) -> Dict[str, Any]:
-    root = Path(path).expanduser()
-    if not root.exists():
-        return {"ok": False, "error": f"path not found: {root}"}
-    if not root.is_dir():
-        return {"ok": False, "error": f"not a directory: {root}"}
-    items = []
-    try:
-        for entry in root.iterdir():
-            try:
-                st = entry.stat()
-                items.append({
-                    "name": entry.name,
-                    "path": str(entry),
-                    "is_dir": entry.is_dir(),
-                    "size": int(st.st_size) if entry.is_file() else None,
-                })
-            except OSError:
-                continue
-            if len(items) >= max_items:
-                break
-        items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
-        return {"ok": True, "path": str(root), "entries": items, "count": len(items), "capped": len(items) >= max_items}
-    except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+def _files_list(path: str, max_items: int = 200, confirm: bool = True) -> Dict[str, Any]:
+    """Backward-compatible helper; default confirm=True so legacy callers keep working."""
+    return files_ops.files_list(path=path, max_items=max_items, confirm=confirm)
 
 
 def _clipboard_image_save(path: str) -> Dict[str, Any]:
