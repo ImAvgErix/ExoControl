@@ -41,6 +41,29 @@ def type_text(text: str) -> bool:
         return r.returncode == 0
     return False
 
+def wheel_abs(x: int, y: int, notches: int = 0, h_notches: int = 0, **kwargs) -> bool:
+    """xdotool: button 5 = page down, 4 = page up. Positive notches = page down."""
+    if not IS_LINUX:
+        return False
+    import shutil, subprocess
+    if not shutil.which("xdotool"):
+        return False
+    if not move_abs(int(x), int(y)):
+        return False
+    ok = True
+    nv = max(-40, min(40, int(notches)))
+    btn = "5" if nv > 0 else "4"
+    for _ in range(abs(nv)):
+        r = subprocess.run(["xdotool", "click", btn], capture_output=True)
+        ok = r.returncode == 0 and ok
+    nh = max(-40, min(40, int(h_notches)))
+    hbtn = "7" if nh > 0 else "6"
+    for _ in range(abs(nh)):
+        r = subprocess.run(["xdotool", "click", hbtn], capture_output=True)
+        ok = r.returncode == 0 and ok
+    return ok
+
+
 def move_abs(x: int, y: int) -> bool:
     if not IS_LINUX:
         return False

@@ -20,6 +20,10 @@ try:
 except ImportError:
     HAS_MSS = False
 
+
+def _mss_session():
+    return getattr(mss, "MSS", mss.mss)()
+
 try:
     from PIL import Image, ImageDraw, ImageChops
     import numpy as np
@@ -117,7 +121,7 @@ class PerceptionEngine:
     def list_monitors(self) -> List[Dict[str, Any]]:
         if not HAS_MSS:
             return [{"id": 0, "width": 1920, "height": 1080, "left": 0, "top": 0}]
-        with mss.mss() as sct:
+        with _mss_session() as sct:
             mons = []
             for i, mon in enumerate(sct.monitors):
                 if i == 0:  # skip the "all" virtual
@@ -138,7 +142,7 @@ class PerceptionEngine:
     ) -> Optional[Image.Image]:
         if not HAS_MSS or not HAS_PIL:
             return None
-        with mss.mss() as sct:
+        with _mss_session() as sct:
             if region:
                 mon = {"left": region[0], "top": region[1], "width": region[2] - region[0], "height": region[3] - region[1]}
             else:

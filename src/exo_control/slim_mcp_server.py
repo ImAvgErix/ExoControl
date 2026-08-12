@@ -57,7 +57,7 @@ def exo_screenshot(
 
 @mcp.tool()
 def exo_help(query: Optional[str] = None, detail: bool = False) -> Dict[str, Any]:
-    """Op catalog. Default is the 14 core ops; detail=true or query=… for the rest."""
+    """Op catalog. Default is the core ops; detail=true or query=… for the rest."""
     out = list_ops(query=query, detail=detail)
     out["identity"] = identity()
     return out

@@ -25,6 +25,12 @@ OPS: List[Dict[str, Any]] = [
      "purpose": "Focused/target UIA tree (compact)", "fields": ["interactive?", "max_elements?"]},
     {"op": "eyes", "aliases": [], "lease": False,
      "purpose": "compact_observe + CDP endpoint summary", "fields": ["include_ocr?"]},
+    {"op": "eyes_start", "aliases": [], "lease": False,
+     "purpose": "Start live eyes loop (also auto on lease_acquire)", "fields": ["fps?", "ocr_on_change?"]},
+    {"op": "eyes_stop", "aliases": [], "lease": False,
+     "purpose": "Stop live eyes loop", "fields": []},
+    {"op": "eyes_read", "aliases": ["look", "glance"], "lease": False,
+     "purpose": "Glance at focused window (title + compact labels)", "fields": ["ocr?"]},
     {"op": "apps", "aliases": [], "lease": False, "purpose": "Running apps pid/title/exe", "fields": ["max?"]},
     {"op": "cdp", "aliases": ["cdp_discover", "exo_cdp"], "lease": False,
      "purpose": "Discover DevTools endpoints (Chrome/Edge/Exo WebView2)", "fields": ["port?"]},
@@ -85,7 +91,15 @@ OPS: List[Dict[str, Any]] = [
     {"op": "fill", "aliases": [], "lease": True,
      "purpose": "Fill fields {label: value} or query+text sugar",
      "fields": ["fields?", "query?", "text?", "submit?", "confirm?"]},
-    {"op": "scroll", "aliases": ["smart_scroll"], "lease": True, "purpose": "Scroll", "fields": ["dy?", "dx?", "query?"]},
+    {"op": "scroll", "aliases": ["smart_scroll"], "lease": True,
+     "purpose": "Aimed SendInput wheel (never Home/End). Positive = page down.",
+     "fields": ["notches?", "direction?", "amount?", "dy?", "dx?", "query?"]},
+    {"op": "scroll_into_view", "aliases": ["into_view"], "lease": True,
+     "purpose": "Wheel until query/bbox is in the document viewport",
+     "fields": ["query?", "bbox?", "max_steps?"]},
+    {"op": "hover", "aliases": [], "lease": True,
+     "purpose": "Move pointer like a person (hover menus/tooltips)",
+     "fields": ["query?", "x?", "y?"]},
     {"op": "drag", "aliases": ["smart_drag"], "lease": True, "purpose": "Drag", "fields": ["x1", "y1", "x2", "y2"]},
     {"op": "hotkey", "aliases": ["smart_hotkey", "keys", "press"], "lease": True,
      "purpose": "Hotkey chord", "fields": ["keys"]},
@@ -130,7 +144,14 @@ OPS: List[Dict[str, Any]] = [
      "purpose": "Click by ref/text/selector", "fields": ["ref?", "text?", "name?", "query?", "selector?", "space_id?"]},
     {"op": "browser_type", "aliases": [], "lease": True, "purpose": "Type in browser", "fields": ["text", "ref?", "space_id?"]},
     {"op": "browser_press", "aliases": [], "lease": True, "purpose": "Key in browser", "fields": ["key", "space_id?"]},
-    {"op": "browser_scroll", "aliases": [], "lease": True, "purpose": "Scroll page", "fields": ["dy?", "space_id?"]},
+    {"op": "browser_scroll", "aliases": [], "lease": True,
+     "purpose": "Scroll the page document (DOM scrollBy, not chrome)",
+     "fields": ["dy?", "dx?", "notches?", "direction?", "query?", "selector?", "ref?", "space_id?"]},
+    {"op": "browser_scroll_into_view", "aliases": ["browser_into_view"], "lease": True,
+     "purpose": "DOM scrollIntoView for text/selector/ref",
+     "fields": ["text?", "selector?", "ref?", "space_id?"]},
+    {"op": "browser_hover", "aliases": [], "lease": True,
+     "purpose": "Hover a page element", "fields": ["text?", "selector?", "ref?", "space_id?"]},
     {"op": "browser_wait", "aliases": [], "lease": True,
      "purpose": "Wait for text/name", "fields": ["text?", "name?", "timeout?", "space_id?"]},
     {"op": "browser_fill", "aliases": [], "lease": True, "purpose": "Fill form fields", "fields": ["fields", "space_id?"]},
@@ -150,7 +171,10 @@ HARNESS_RULES: List[str] = [
     "Works with ANY AI via MCP (stdio), CLI, or Python — not tied to one vendor.",
     "Script-first: prefer one batched exec with many steps over chatty single clicks.",
     "Acquire lease_acquire before hands (click/type/launch/browser/files write).",
+    "You are a person in the chair: aim the pointer, wheel the document, glance after hands.",
+    "Scroll with scroll / scroll_into_view / browser_scroll. Never Home/End (they jump the caret).",
     "Eyes first: observe/read/windows/verify; screenshots only when structure is insufficient.",
+    "Hands attach a compact seen glance when live eyes are running (seen:false to skip).",
     "Compact by default; set verbose=true only when you need full trees.",
     "Focus by title; WinUI host ranks above WebView2 child windows.",
     "monitor=N binds focus/observe/shot to that display; wrong-monitor fails closed.",
@@ -158,7 +182,7 @@ HARNESS_RULES: List[str] = [
     "Files outside EXO_FILE_ROOTS stay denied unless the operator sets EXO_ALLOW_OUTSIDE_ROOTS=1.",
     "lease_status never returns the token. force_release needs token, holder, or EXO_ALLOW_FORCE_RELEASE=1.",
     "Always lease_release when done (or let TTL expire).",
-    "Never invent UI state — use step results / observe / verify.",
+    "Never invent UI state — use step results / observe / verify / seen.",
 ]
 
 MINIMAL_SCRIPT_EXAMPLE: List[Dict[str, Any]] = [
@@ -173,8 +197,8 @@ MINIMAL_SCRIPT_EXAMPLE: List[Dict[str, Any]] = [
 
 CORE_OPS = (
     "help", "status", "lease_acquire", "lease_release", "lease_status",
-    "launch", "focus", "read", "observe", "click", "type", "verify",
-    "wait", "screenshot",
+    "launch", "focus", "read", "observe", "click", "type", "scroll",
+    "scroll_into_view", "hover", "verify", "wait", "screenshot",
 )
 
 
@@ -254,8 +278,9 @@ def mcp_instructions() -> str:
         "Exo Control — realtime Windows eyes/hands for ANY AI harness (MCP/CLI/Python). "
         "Use exo_exec with a JSON array of steps. "
         "Always start mutating work with {\"op\":\"lease_acquire\",\"agent_id\":\"…\",\"task\":\"…\"} "
-        "and end with lease_release. Prefer structure: focus → observe/read → click/type → verify. "
-        "Screenshots only when pixels matter (exo_screenshot). "
+        "and end with lease_release. Prefer structure: focus → observe/read → click/type/scroll → verify. "
+        "Scroll with aimed wheel (scroll / scroll_into_view / browser_scroll). Never Home/End. "
+        "Hands attach a compact seen glance. Screenshots only when pixels matter (exo_screenshot). "
         "Call exo_help or step {\"op\":\"help\"} for ops (detail=true for the full catalog). "
         "Example: [{\"op\":\"lease_acquire\",\"agent_id\":\"agent\",\"task\":\"demo\",\"ttl_sec\":120},"
         "{\"op\":\"launch\",\"app\":\"notepad\"},{\"op\":\"type\",\"text\":\"hi\"},{\"op\":\"lease_release\"}]. "

@@ -19,6 +19,7 @@ You control a Windows PC via Exo Control.
 - Prefer one batched script over many single clicks.
 - Mutating work: lease_acquire → act → lease_release.
 - Eyes first: windows / observe / read / verify. Screenshots only if structure fails.
+- Scroll with scroll / scroll_into_view / browser_scroll. Never Home/End.
 - Call help (or MCP exo_help) before inventing ops.
 - confirm=true for destructive OS ops. Never kill anti-cheat.
 - Compact responses by default; do not dump raw HTML/trees unless verbose.
@@ -129,7 +130,7 @@ Or MCP: `exo_help` with optional `query`.
 ## Install once
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0"
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"
 exo-control doctor
 # optional CDP:
 pip install "exo-control[browser]"

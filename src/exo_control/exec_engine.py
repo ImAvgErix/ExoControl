@@ -26,6 +26,7 @@ from exo_control.policy import (
     deny_browser_eval,
     identity,
     is_dangerous_launch,
+    live_eyes_enabled,
     open_needs_confirm,
     parse_confirm,
     sanitize_cdp_endpoints,
@@ -128,6 +129,7 @@ class ExoExecEngine:
         self._desktop_refs: Dict[str, Dict[str, Any]] = {}
         self._last_error: Optional[Dict[str, Any]] = None
         self._script_launched_pids: List[int] = []
+        self._eyes_started_by_lease = False
 
     def _get_browser(self):
         if self._browser is None:
@@ -517,7 +519,8 @@ class ExoExecEngine:
             if op.startswith("wait") or op.startswith("verify") or op in {
                 "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
                 "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
-                "eyes", "apps", "files_list", "files_read", "notify", "clipboard_image_save", "wait_window",
+                "eyes", "eyes_start", "eyes_stop", "eyes_read", "look", "glance",
+                "apps", "files_list", "files_read", "notify", "clipboard_image_save", "wait_window",
                 "observe_budget", "registry_read", "proc_list", "service_list", "service_status",
                 "env_get", "env_list", "tasks_list", "startup_list",
             }:
@@ -635,10 +638,11 @@ class ExoExecEngine:
 
 
     def _require_focus(self, op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Hard-fail click/type/fill/keys when nothing is focused."""
+        """Hard-fail click/type/fill/keys/wheel when nothing is focused."""
         if op not in {
             "click", "smart_click", "type", "smart_type", "fill",
             "keys", "press", "hotkey", "smart_hotkey",
+            "scroll", "smart_scroll", "scroll_into_view", "into_view", "hover",
         }:
             return None
         ctrl = self.ctrl
@@ -778,12 +782,14 @@ class ExoExecEngine:
                 pass
         value = self._maybe_compact_result(op, step, value)
         self._record_action(op, step, value)
+        value = self._maybe_attach_seen(op, step, value)
         return value
 
     def _maybe_compact_result(self, op: str, step: Dict[str, Any], value: Any) -> Any:
         """Compact eyes/snapshot payloads unless step.verbose is True."""
         compact_ops = {
-            "observe", "compact_observe", "eyes", "browser_snapshot", "read_ui", "read",
+            "observe", "compact_observe", "eyes", "eyes_read", "look", "glance",
+            "browser_snapshot", "read_ui", "read",
         }
         if op not in compact_ops:
             return value
@@ -802,6 +808,91 @@ class ExoExecEngine:
                     return value
                 # still mark compact for consistency when under cap? Spec: wrap unless verbose.
         return compact_payload(value, verbose=verbose)
+
+    _SEEN_AFTER = frozenset({
+        "click", "smart_click", "type", "smart_type", "fill",
+        "scroll", "smart_scroll", "scroll_into_view", "into_view", "hover",
+        "drag", "smart_drag", "hotkey", "smart_hotkey", "keys", "press",
+        "browser_click", "browser_type", "browser_scroll", "browser_scroll_into_view",
+        "browser_into_view", "browser_hover", "browser_press", "browser_fill",
+        "browser_navigate",
+    })
+
+    def _maybe_start_live_eyes(self, step: Dict[str, Any], out: Dict[str, Any]) -> None:
+        if step.get("eyes") is False or not live_eyes_enabled():
+            return
+        ctrl = self.ctrl
+        if not hasattr(ctrl, "eyes_start"):
+            return
+        already = bool(getattr(getattr(ctrl, "_eyes", None), "_running", False))
+        try:
+            started = ctrl.eyes_start(
+                fps=float(step.get("fps", 6.0)),
+                ocr_on_change=bool(step.get("ocr_on_change", False)),
+            )
+            out["eyes"] = started if isinstance(started, dict) else {"ok": True}
+            if not already:
+                self._eyes_started_by_lease = True
+            self._hint_eyes_focus()
+        except Exception as exc:
+            out["eyes"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    def _maybe_stop_live_eyes(self, out: Dict[str, Any]) -> None:
+        if not self._eyes_started_by_lease:
+            return
+        ctrl = self.ctrl
+        self._eyes_started_by_lease = False
+        if not hasattr(ctrl, "eyes_stop"):
+            return
+        try:
+            stopped = ctrl.eyes_stop()
+            out["eyes"] = stopped if isinstance(stopped, dict) else {"ok": True, "stopped": True}
+        except Exception as exc:
+            out["eyes"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    def _hint_eyes_focus(self, focused: Optional[Mapping[str, Any]] = None) -> None:
+        ctrl = self.ctrl
+        eyes = getattr(ctrl, "_eyes", None)
+        setter = getattr(eyes, "set_focus_hint", None)
+        if not callable(setter):
+            return
+        pid = None
+        hwnd = None
+        monitor = None
+        if focused:
+            pid = focused.get("pid")
+            hwnd = focused.get("window_id") or focused.get("hwnd")
+            monitor = focused.get("monitor")
+        setter(
+            pid=pid if pid is not None else getattr(ctrl, "_focus_pid", None),
+            hwnd=hwnd if hwnd is not None else getattr(ctrl, "_focus_window_id", None),
+            monitor=monitor if monitor is not None else getattr(ctrl, "_focus_monitor", None),
+        )
+
+    def _maybe_attach_seen(self, op: str, step: Dict[str, Any], value: Any) -> Any:
+        if step.get("seen") is False or not live_eyes_enabled():
+            return value
+        if op not in self._SEEN_AFTER:
+            return value
+        if not isinstance(value, dict) or not _step_ok(value):
+            return value
+        ctrl = self.ctrl
+        eyes = getattr(ctrl, "_eyes", None)
+        if eyes is None or not getattr(eyes, "_running", False):
+            return value
+        try:
+            if hasattr(ctrl, "glance"):
+                seen = ctrl.glance(force_ocr=False)
+            elif hasattr(ctrl, "eyes_read"):
+                seen = ctrl.eyes_read(force_ocr=False)
+            else:
+                return value
+            if isinstance(seen, dict) and seen.get("ok"):
+                value = dict(value)
+                value["seen"] = seen
+        except Exception:
+            return value
+        return value
 
     def _browser_click_with_structure_miss(
         self, browser: Any, step: Dict[str, Any]
@@ -961,6 +1052,8 @@ class ExoExecEngine:
                     {"title": focused.get("title"), "pid": focused.get("pid"),
                      "window_id": focused.get("window_id"), "monitor": focused.get("monitor")},
                 )
+            if isinstance(focused, dict) and focused.get("ok"):
+                self._hint_eyes_focus(focused)
             return focused
         if op in {"read", "read_ui"}:
             return ctrl.read_ui(
@@ -1032,13 +1125,41 @@ class ExoExecEngine:
                 _out = ctrl.smart_type(**_kwargs)
             return _action_result(_out)
         if op in {"scroll", "smart_scroll"}:
-            return _action_result(
-                ctrl.smart_scroll(
-                    dy=int(step.get("dy", 600)),
-                    dx=int(step.get("dx", 0)),
-                    query=step.get("query"),
+            kwargs: Dict[str, Any] = {
+                "query": step.get("query"),
+                "notches": step.get("notches"),
+                "direction": step.get("direction") or step.get("dir"),
+                "amount": step.get("amount"),
+                "bbox": step.get("bbox"),
+            }
+            if step.get("dy") is not None:
+                kwargs["dy"] = int(step["dy"])
+            if step.get("dx") is not None:
+                kwargs["dx"] = int(step["dx"])
+            try:
+                return _action_result(ctrl.smart_scroll(**kwargs))
+            except TypeError:
+                return _action_result(
+                    ctrl.smart_scroll(
+                        dy=int(step.get("dy", 600)),
+                        dx=int(step.get("dx", 0)),
+                        query=step.get("query"),
+                    )
                 )
-            )
+        if op in {"scroll_into_view", "into_view"}:
+            if hasattr(ctrl, "scroll_into_view"):
+                return ctrl.scroll_into_view(
+                    query=step.get("query") or step.get("text") or step.get("name"),
+                    bbox=step.get("bbox"),
+                    max_steps=int(step.get("max_steps", 12)),
+                )
+            return {"ok": False, "error": "scroll_into_view not available"}
+        if op == "hover":
+            if hasattr(ctrl, "hover"):
+                return _action_result(
+                    ctrl.hover(query=step.get("query"), x=step.get("x"), y=step.get("y"))
+                )
+            return {"ok": False, "error": "hover not available"}
         if op in {"drag", "smart_drag"}:
             return _action_result(
                 ctrl.smart_drag(
@@ -1150,7 +1271,39 @@ class ExoExecEngine:
         if op == "browser_press":
             return browser.press(str(step.get("key", "")), step.get("space_id"))
         if op == "browser_scroll":
-            return browser.scroll(int(step.get("dy", 600)), step.get("space_id"))
+            kwargs = dict(
+                dy=step.get("dy"),
+                space_id=step.get("space_id"),
+                dx=step.get("dx", 0),
+                notches=step.get("notches"),
+                direction=step.get("direction") or step.get("dir"),
+                amount=step.get("amount"),
+                query=step.get("query") or step.get("text") or step.get("name"),
+                selector=step.get("selector"),
+                ref=step.get("ref"),
+            )
+            try:
+                return browser.scroll(**kwargs)
+            except TypeError:
+                return browser.scroll(int(step.get("dy", 600)), step.get("space_id"))
+        if op in {"browser_scroll_into_view", "browser_into_view"}:
+            if hasattr(browser, "scroll_into_view"):
+                return browser.scroll_into_view(
+                    text=step.get("text") or step.get("query") or step.get("name"),
+                    selector=step.get("selector"),
+                    ref=step.get("ref"),
+                    space_id=step.get("space_id"),
+                )
+            return {"ok": False, "error": "browser_scroll_into_view not available"}
+        if op == "browser_hover":
+            if hasattr(browser, "hover"):
+                return browser.hover(
+                    ref=step.get("ref"),
+                    selector=step.get("selector"),
+                    text=step.get("text") or step.get("query") or step.get("name"),
+                    space_id=step.get("space_id"),
+                )
+            return {"ok": False, "error": "browser_hover not available"}
         if op == "browser_wait":
             # Op layer uses SECONDS (like wait_change). Playwright wants ms.
             raw_t = float(step.get("timeout", 15))
@@ -1490,6 +1643,7 @@ class ExoExecEngine:
             )
             if out.get("ok") and out.get("token"):
                 self._script_lease_token = str(out["token"])
+                self._maybe_start_live_eyes(step, out)
             return out
         if op == "lease_renew":
             token = self._lease_token(step) or str(step.get("token") or "")
@@ -1506,9 +1660,29 @@ class ExoExecEngine:
             if out.get("ok") and out.get("released"):
                 if self._script_lease_token == token:
                     self._script_lease_token = None
+                self._maybe_stop_live_eyes(out)
             return out
         if op == "lease_status":
             return desktop_lease.status()
+
+        if op == "eyes_start":
+            if hasattr(ctrl, "eyes_start"):
+                return ctrl.eyes_start(
+                    fps=float(step.get("fps", 6.0)),
+                    ocr_on_change=bool(step.get("ocr_on_change", True)),
+                )
+            return {"ok": False, "error": "eyes_start not available"}
+        if op == "eyes_stop":
+            if hasattr(ctrl, "eyes_stop"):
+                self._eyes_started_by_lease = False
+                return ctrl.eyes_stop()
+            return {"ok": False, "error": "eyes_stop not available"}
+        if op in {"eyes_read", "look", "glance"}:
+            if hasattr(ctrl, "glance"):
+                return ctrl.glance(force_ocr=bool(step.get("ocr") or step.get("force_ocr")))
+            if hasattr(ctrl, "eyes_read"):
+                return ctrl.eyes_read(force_ocr=bool(step.get("ocr") or step.get("force_ocr")))
+            return {"ok": False, "error": "eyes_read not available"}
 
         if op == "eyes":
             observe = ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", False)))
@@ -1685,6 +1859,7 @@ class ExoExecEngine:
                     self._script_lease_token = None
                 elif not token:
                     self._script_lease_token = None
+                self._maybe_stop_live_eyes(out)
             return out
 
         if op in {"kill_switch", "arm_kill_switch", "disarm_kill_switch"}:

@@ -142,7 +142,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if aether_path and exo_path else False
             ),
             "warnings": warnings,
-            "hint": "pip install \"git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0\"",
+            "hint": "pip install \"git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0\"",
         })
         return 0 if not warnings else 1
 

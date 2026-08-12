@@ -4,8 +4,10 @@ Exo Control is the shared pair of **eyes and hands** on a Windows machine. Agent
 
 ## Model
 
-1. **Eyes (read-only)** — `windows`, `observe`/`read`, `eyes`, `cdp_discover`, `wait_cdp`, `status`, `stats`, `clipboard_get`, `apps`, `files_list` (inside roots), `lease_*`, `help`. No lease required.
-2. **Hands (mutating)** — click/type/scroll/drag/hotkey/fill/focus/window_*/launch/open/screenshot/browser_*/clipboard_set/proc-kill/notify. Require a valid desktop lease.
+1. **Eyes (read-only)** — `windows`, `observe`/`read`, `eyes`, `eyes_read`/`look`, `cdp_discover`, `wait_cdp`, `status`, `stats`, `clipboard_get`, `apps`, `files_list` (inside roots), `lease_*`, `help`. No lease required.
+2. **Hands (mutating)** — click/type/scroll/scroll_into_view/hover/drag/hotkey/fill/focus/window_*/launch/open/screenshot/browser_*/clipboard_set/proc-kill/notify. Require a valid desktop lease.
+
+`lease_acquire` starts a live eyes loop (disable with `eyes:false` or `EXO_LIVE_EYES=0`). After hands, the step result includes a compact `seen` glance. Scroll is an aimed SendInput wheel on the document — never Home/End. Browser scroll hits the page (`window.scrollBy` / `scrollIntoView`), not chrome.
 3. **Exo Launcher / WebView2** — optional first-class target. Launch with CDP (`scripts/Launch-ExoWithCdp.ps1`), then `wait_cdp` / `cdp_discover` / browser ops. Control works without Exo Launcher.
 
 ## Desktop lease

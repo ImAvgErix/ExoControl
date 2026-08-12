@@ -3,6 +3,17 @@
 Version history for the **Exo Control** Python package.  
 This is a library (pip / wheel), not a Setup.exe. GitHub Release may include the wheel + sdist.
 
+## 2.1.0
+
+Human substitute — sit in the chair, use the mouse wheel, look at the screen.
+
+- **Aimed SendInput wheel.** `scroll` moves the pointer into the document (below chrome) and sends `MOUSEEVENTF_WHEEL` one notch at a time. Positive notches = page down. Never Home/End.
+- **`scroll_into_view`** wheels until a query/bbox sits in the focused viewport.
+- **`hover`** eases the pointer (no teleport) so hover menus work.
+- **Browser page scroll.** `browser_scroll` uses `window.scrollBy` on the document; `browser_scroll_into_view` / `browser_hover` are first-class.
+- **Live eyes.** `lease_acquire` starts the realtime loop. After hands, results include a compact `seen` glance (`title`, `changed`, labels). `eyes_read` / `look` / `glance`. Off with `EXO_LIVE_EYES=0` or `seen:false`.
+- Core catalog now includes `scroll`, `scroll_into_view`, `hover`.
+
 ## 2.0.0
 
 - **Physical package invert:** implementation lives in `src/exo_control/`. `src/aether/` is a thin compat shim (`import aether` still works).

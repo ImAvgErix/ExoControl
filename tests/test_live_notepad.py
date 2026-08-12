@@ -53,3 +53,43 @@ def test_notepad_type_read_close():
     assert marker in blob or any(
         marker in str(s["result"]) for s in out["steps"] if s["op"] in {"verify", "type"}
     )
+
+
+@pytest.mark.live
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_notepad_aimed_wheel():
+    """Type a tall buffer, then scroll with SendInput wheel (not Home/End)."""
+    if _want_live() == "0":
+        pytest.skip("EXO_LIVE=0")
+    eng = ExoExecEngine()
+    body = "\n".join(f"exo-wheel-line-{i:02d}" for i in range(40))
+    out = eng.execute(
+        {
+            "steps": [
+                {"op": "lease_acquire", "agent_id": "live-wheel", "task": "scroll", "ttl_sec": 90},
+                {"op": "launch", "app": "notepad", "timeout": 12},
+                {"op": "focus", "title": "Notepad"},
+                {"op": "type", "text": body},
+                {"op": "scroll", "direction": "up", "amount": "page"},
+                {"op": "scroll", "notches": 4},
+            ],
+            "finally": [
+                {"op": "window_close", "title": "Notepad", "discard_unsaved": True},
+                {"op": "lease_release"},
+            ],
+        }
+    )
+    if not out.get("ok"):
+        err = (out.get("last_error") or {}).get("error") or ""
+        launch = next((s for s in out.get("steps") or [] if s.get("op") == "launch"), None)
+        if _want_live() != "1" and launch and not launch.get("ok"):
+            pytest.skip(f"notepad launch failed: {launch.get('result')}")
+        if _want_live() != "1" and "desktop" in str(err).lower():
+            pytest.skip(f"no interactive desktop: {err}")
+    assert out["ok"] is True, out.get("last_error") or out
+    wheels = [s for s in out["steps"] if s["op"] == "scroll"]
+    assert wheels and all(s["ok"] for s in wheels)
+    msg = " ".join(str(s["result"].get("message") or "") for s in wheels)
+    assert "wheel" in msg
+    assert "home" not in msg.lower()
+    assert "end" not in msg.lower()

@@ -4,12 +4,15 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
+def _mss_session():
+    import mss
+    return getattr(mss, "MSS", mss.mss)()
+
+
 def list_monitor_dicts() -> List[Dict[str, Any]]:
     """Return physical monitors (mss index style: id starts at 1)."""
     try:
-        import mss
-
-        with mss.mss() as sct:
+        with _mss_session() as sct:
             out: List[Dict[str, Any]] = []
             for i, mon in enumerate(sct.monitors):
                 if i == 0:

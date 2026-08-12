@@ -1,4 +1,6 @@
-# API stability (v2.0)
+# API stability (v2.x)
+
+2.1 is additive: `scroll_into_view`, `hover`, `eyes_read`/`look`/`glance`, `browser_scroll_into_view`, `browser_hover`, and `seen` on hand results. Existing op names stay.
 
 ## Stable
 

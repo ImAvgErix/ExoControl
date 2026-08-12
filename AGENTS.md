@@ -16,14 +16,18 @@ If you do not know an op, run `{"op":"help"}` or `exo_help` first.
 2. **Plan a script** — batch many steps in one `exo_exec` call
 3. **Focus** the window (`title` substring; optional `monitor`)
 4. **Observe/read** structure — do **not** screenshot first
-5. **Act** (click/type/fill/browser_*) then **verify**
+5. **Act** (click/type/fill/scroll/browser_*) then **verify**
 6. **lease_release** when done
+
+You are a person at the desk. Aim the pointer. Roll the wheel on the document. Glance after you move.
 
 ## Do / don't
 
 | Do | Don't |
 |----|--------|
 | UIA / DOM / refs | Coordinate spam |
+| `scroll` / `scroll_into_view` / `browser_scroll` | Home / End (they jump the caret, they are not scroll) |
+| Read `seen` after hands (live eyes) | Assume the screen did not change |
 | `require_change` when UI should flip | Assume click worked |
 | `confirm=true` for kill/registry write/delete | Silent destructive OS ops or `confirm` to escape allowroots |
 | Fail closed and report step errors | Invent window titles or UI text |

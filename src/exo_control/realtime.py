@@ -40,7 +40,7 @@ class RealtimeEyes:
         self,
         perception=None,
         fps: float = 6.0,
-        ocr_on_change: bool = True,
+        ocr_on_change: bool = False,
         focused_window: bool = True,
     ):
         self._perception = perception

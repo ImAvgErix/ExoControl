@@ -14,7 +14,7 @@ Hardened PC control plane. Not tied to Cursor, Grok, Claude, or Codex — those 
 3. **Python**: `from exo_control import ExoExecEngine`
 
 Server: `python -m exo_control.slim_mcp_server`  
-Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0"` (or `pip install -e .`).  
+Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"` (or `pip install -e .`).  
 Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`.
 
 ## Rules

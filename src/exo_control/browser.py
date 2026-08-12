@@ -554,11 +554,170 @@ class BrowserEngine:
         await space.page.keyboard.press(key)
         return {"ok": True, "key": key}
 
-    async def scroll(self, dy: int = 600, space_id: Optional[str] = None) -> Dict[str, Any]:
+    async def scroll(
+        self,
+        dy: Any = None,
+        space_id: Optional[str] = None,
+        dx: int = 0,
+        notches: Optional[int] = None,
+        direction: Optional[str] = None,
+        amount: Any = None,
+        query: Optional[str] = None,
+        selector: Optional[str] = None,
+        ref: Optional[int] = None,
+        text: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Scroll the *page document*, not browser chrome.
+
+        Prefer window.scrollBy. Wheel is fallback. query/selector/ref → scrollIntoView.
+        """
+        needle = query or text or name
+        if needle or selector or ref is not None:
+            return await self.scroll_into_view(
+                text=needle, selector=selector, ref=ref, space_id=space_id
+            )
+        from .pointer import parse_scroll, WHEEL_DELTA
+
+        req = parse_scroll({
+            "dy": dy,
+            "dx": dx,
+            "notches": notches,
+            "direction": direction,
+            "amount": amount,
+        })
+        px_y = int(req["notches"]) * WHEEL_DELTA
+        px_x = int(req["h_notches"]) * WHEEL_DELTA
+        if px_y == 0 and px_x == 0:
+            px_y = 3 * WHEEL_DELTA
         await self.ensure_started()
         space = self._get_space(space_id)
-        await space.page.mouse.wheel(0, dy)
-        return {"ok": True, "dy": dy}
+        page = space.page
+        before = await page.evaluate(
+            "() => ({x: window.scrollX, y: window.scrollY, h: document.documentElement.scrollHeight})"
+        )
+        await page.evaluate(
+            "([x, y]) => { window.scrollBy({left: x, top: y, behavior: 'instant'}); }",
+            [px_x, px_y],
+        )
+        after = await page.evaluate("() => ({x: window.scrollX, y: window.scrollY})")
+        method = "dom"
+        if after.get("x") == before.get("x") and after.get("y") == before.get("y"):
+            try:
+                vp = page.viewport_size or {"width": 900, "height": 700}
+                await page.mouse.move(int(vp["width"]) // 2, int(vp["height"]) // 2)
+                await page.mouse.wheel(px_x, px_y)
+                after = await page.evaluate("() => ({x: window.scrollX, y: window.scrollY})")
+                method = "wheel"
+            except Exception:
+                pass
+        return {
+            "ok": True,
+            "method": method,
+            "dy": px_y,
+            "dx": px_x,
+            "notches": req["notches"],
+            "h_notches": req["h_notches"],
+            "before": before,
+            "after": after,
+        }
+
+    async def scroll_into_view(
+        self,
+        text: Optional[str] = None,
+        selector: Optional[str] = None,
+        ref: Optional[int] = None,
+        space_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        page = space.page
+        needle = text
+        if selector:
+            loc = page.locator(selector)
+            await loc.first.scroll_into_view_if_needed(timeout=8000)
+            return {"ok": True, "method": "selector", "selector": selector}
+        if needle and ref is None:
+            matched = await self._resolve_text_ref(page, str(needle))
+            if matched is not None:
+                ref = int(matched["ref"])
+            else:
+                try:
+                    loc = page.get_by_text(str(needle), exact=False)
+                    if await loc.count() > 0:
+                        await loc.first.scroll_into_view_if_needed(timeout=8000)
+                        return {"ok": True, "method": "text", "text": str(needle)}
+                except Exception:
+                    pass
+                return {"ok": False, "error": f"No element matching text={needle!r}"}
+        if ref is not None:
+            handle = await page.evaluate_handle(f"""() => {{
+                const sel = [
+                  'a', 'button', 'input', 'textarea', 'select',
+                  '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]',
+                  '[onclick]', '[tabindex]',
+                  '[aria-label]', '[title]', '[data-tooltip]'
+                ].join(',');
+                const nodes = Array.from(document.querySelectorAll(sel)).slice(0, 120);
+                return nodes[{int(ref)}] || null;
+            }}""")
+            el = handle.as_element()
+            if el is None:
+                return {"ok": False, "error": f"No element for ref={ref}"}
+            await el.evaluate(
+                "node => node.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'})"
+            )
+            out: Dict[str, Any] = {"ok": True, "method": "ref", "ref": int(ref)}
+            if needle:
+                out["query"] = str(needle)
+            return out
+        return {"ok": False, "error": "need text, selector, or ref"}
+
+    async def hover(
+        self,
+        ref: Optional[int] = None,
+        selector: Optional[str] = None,
+        text: Optional[str] = None,
+        name: Optional[str] = None,
+        query: Optional[str] = None,
+        space_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        page = space.page
+        needle = text or name or query
+        if selector:
+            await page.locator(selector).first.hover(timeout=8000)
+            return {"ok": True, "method": "selector", "selector": selector}
+        if needle and ref is None:
+            matched = await self._resolve_text_ref(page, str(needle))
+            if matched is None:
+                try:
+                    loc = page.get_by_text(str(needle), exact=False)
+                    if await loc.count() > 0:
+                        await loc.first.hover(timeout=8000)
+                        return {"ok": True, "method": "text", "text": str(needle)}
+                except Exception:
+                    pass
+                return {"ok": False, "error": f"No element matching text={needle!r}"}
+            ref = int(matched["ref"])
+        if ref is not None:
+            handle = await page.evaluate_handle(f"""() => {{
+                const sel = [
+                  'a', 'button', 'input', 'textarea', 'select',
+                  '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]',
+                  '[onclick]', '[tabindex]',
+                  '[aria-label]', '[title]', '[data-tooltip]'
+                ].join(',');
+                const nodes = Array.from(document.querySelectorAll(sel)).slice(0, 120);
+                return nodes[{int(ref)}] || null;
+            }}""")
+            el = handle.as_element()
+            if el is None:
+                return {"ok": False, "error": f"No element for ref={ref}"}
+            await el.hover(timeout=8000)
+            return {"ok": True, "method": "ref", "ref": int(ref)}
+        return {"ok": False, "error": "need text, selector, or ref"}
 
     async def evaluate(self, js: str, space_id: Optional[str] = None) -> Dict[str, Any]:
         """Run arbitrary JS in the page (powerful escape hatch)."""
@@ -757,8 +916,32 @@ class BrowserEngineSync:
     def press(self, key: str, space_id: Optional[str] = None):
         return self._run(self._engine.press(key, space_id))
 
-    def scroll(self, dy: int = 600, space_id: Optional[str] = None):
-        return self._run(self._engine.scroll(dy, space_id))
+    def scroll(self, dy: Any = None, space_id: Optional[str] = None, **kwargs):
+        return self._run(self._engine.scroll(dy, space_id, **kwargs))
+
+    def scroll_into_view(
+        self,
+        text: Optional[str] = None,
+        selector: Optional[str] = None,
+        ref: Optional[int] = None,
+        space_id: Optional[str] = None,
+    ):
+        return self._run(self._engine.scroll_into_view(
+            text=text, selector=selector, ref=ref, space_id=space_id
+        ))
+
+    def hover(
+        self,
+        ref: Optional[int] = None,
+        selector: Optional[str] = None,
+        text: Optional[str] = None,
+        name: Optional[str] = None,
+        query: Optional[str] = None,
+        space_id: Optional[str] = None,
+    ):
+        return self._run(self._engine.hover(
+            ref=ref, selector=selector, text=text, name=name, query=query, space_id=space_id
+        ))
 
     def evaluate(self, js: str, space_id: Optional[str] = None):
         return self._run(self._engine.evaluate(js, space_id))

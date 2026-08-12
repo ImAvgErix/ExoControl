@@ -100,6 +100,11 @@ def allow_screenshot_on_fail_default() -> bool:
     return env_flag("EXO_SCREENSHOT_ON_FAIL", default=False)
 
 
+def live_eyes_enabled() -> bool:
+    """Background eyes + after-hand ``seen``. Off with EXO_LIVE_EYES=0."""
+    return env_flag("EXO_LIVE_EYES", "AETHER_LIVE_EYES", default=True)
+
+
 def max_lease_ttl_sec() -> float:
     return float(max(5, env_int("EXO_LEASE_MAX_TTL", "AETHER_LEASE_MAX_TTL", default=1800)))
 
@@ -190,6 +195,7 @@ def identity() -> Dict[str, Any]:
             "allow_env_values": allow_env_values(),
             "deny_browser_eval": deny_browser_eval(),
             "mcp_aliases": allow_mcp_aliases(),
+            "live_eyes": live_eyes_enabled(),
             "max_lease_ttl_sec": max_lease_ttl_sec(),
         },
     }

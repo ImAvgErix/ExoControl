@@ -8,7 +8,7 @@ Everything practical for higher accuracy + speed:
   - Observation cache (continuous perception)
   - UI memory of successful targets
   - smart_click / smart_type with verify + retry
-  - smart_scroll / smart_drag / smart_hotkey
+  - smart_scroll / scroll_into_view / hover / smart_drag / smart_hotkey
   - Batched actions (one observe, many acts)
   - Region-aware verification
 """
@@ -212,12 +212,12 @@ class SmartController:
         return get_uia_cache()
 
     def _get_eyes(self):
-        if self._eyes is None:
+        if getattr(self, "_eyes", None) is None:
             from .realtime import get_realtime_eyes
-            self._eyes = get_realtime_eyes(self.perception)
+            self._eyes = get_realtime_eyes(getattr(self, "perception", None))
         return self._eyes
 
-    def eyes_start(self, fps: float = 6.0, ocr_on_change: bool = True) -> Dict[str, Any]:
+    def eyes_start(self, fps: float = 6.0, ocr_on_change: bool = False) -> Dict[str, Any]:
         eyes = self._get_eyes()
         eyes.fps = max(1.0, float(fps))
         eyes.ocr_on_change = bool(ocr_on_change)
@@ -229,6 +229,34 @@ class SmartController:
     def eyes_read(self, force_ocr: bool = False) -> Dict[str, Any]:
         """Realtime read of what you're looking at (focused window + a11y + OCR)."""
         return self._get_eyes().read_now(force_ocr=force_ocr)
+
+    def glance(self, force_ocr: bool = False) -> Dict[str, Any]:
+        """Compact what a person would notice after moving the mouse or keys."""
+        raw = self.eyes_read(force_ocr=force_ocr)
+        if not isinstance(raw, dict) or not raw.get("ok"):
+            err = raw.get("error") if isinstance(raw, dict) else "no eyes"
+            return {"ok": False, "error": err}
+        labels: List[str] = []
+        for item in raw.get("a11y") or []:
+            if isinstance(item, dict) and item.get("name"):
+                labels.append(str(item["name"])[:80])
+            if len(labels) >= 12:
+                break
+        if not labels:
+            for item in raw.get("labels") or []:
+                if isinstance(item, dict) and item.get("text"):
+                    labels.append(str(item["text"])[:80])
+                if len(labels) >= 8:
+                    break
+        return {
+            "ok": True,
+            "title": raw.get("title") or "",
+            "changed": bool(raw.get("changed")),
+            "age_ms": raw.get("age_ms"),
+            "phash": str(raw.get("phash") or "")[:16],
+            "labels": labels,
+            "pid": raw.get("pid"),
+        }
 
     def read_ui(self, pid: Optional[int] = None, force: bool = False,
                 interactive_only: bool = False, max_elements: int = 120) -> Dict[str, Any]:
@@ -1258,28 +1286,179 @@ class SmartController:
                              attempts=1, target=focus_target,
                              elapsed=time.time()-t0, backend=backend_used)
 
-    def smart_scroll(self, dy: int = 600, dx: int = 0, query: Optional[str] = None) -> ActionOutcome:
-        t0 = time.time()
+    def _aim_for_wheel(self, query: Optional[str] = None, bbox: Optional[list] = None) -> tuple:
+        """Screen point over the document (not the title bar / address bar)."""
+        from .pointer import aim_point
+
+        if bbox and len(bbox) >= 4:
+            return (int(bbox[0]) + int(bbox[2])) // 2, (int(bbox[1]) + int(bbox[3])) // 2
         if query:
-            self.smart_click(query=query, require_change=False)
-            time.sleep(0.1)
-        pre = self.observe(modes=["diff"], include_image=False, use_cache=False)
-        # Prefer local for scroll (universal)
+            hits = self.find_targets(query)
+            if hits and hits[0].center:
+                return int(hits[0].center[0]), int(hits[0].center[1])
+        st = self.window_state(self._focus_window_id)
+        rect = st.get("rect") if isinstance(st, dict) else None
+        if rect and len(rect) == 4:
+            title = ""
+            try:
+                title = str(self._uia().get_tree(self._focus_pid, self._focus_window_id).title or "")
+            except Exception:
+                title = ""
+            chrome = 90 if any(k in title.lower() for k in ("chrome", "edge", "helium", "firefox", "brave")) else 48
+            return aim_point(rect, chrome_top=chrome)
+        return None, None
+
+    def _wheel_at(self, x: int, y: int, notches: int, h_notches: int = 0) -> bool:
         try:
-            r = self.local_fallback.engine.scroll(dx=dx, dy=dy)
-            ok = getattr(r, "success", True)
-        except Exception as e:
-            return ActionOutcome(False, False, str(e), elapsed=time.time()-t0, backend="local")
-        time.sleep(0.15)
-        # Scrolling changes which elements are on screen, so the cached tree no
-        # longer describes what is clickable.
+            from .synthetic.inject_win import wheel_abs
+            if wheel_abs(int(x), int(y), int(notches), int(h_notches)):
+                return True
+        except Exception:
+            pass
+        try:
+            # Fallback: pynput notches (positive = up). Invert our page-down sign.
+            if self.local_fallback and getattr(self.local_fallback, "engine", None):
+                self.local_fallback.engine.scroll(dx=-int(h_notches), dy=-int(notches), x=x, y=y)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def smart_scroll(
+        self,
+        dy: int = 0,
+        dx: int = 0,
+        query: Optional[str] = None,
+        notches: Optional[int] = None,
+        direction: Optional[str] = None,
+        amount: Any = None,
+        bbox: Optional[list] = None,
+    ) -> ActionOutcome:
+        from .pointer import parse_scroll
+
+        t0 = time.time()
+        req = parse_scroll({
+            "dy": dy if dy else None,
+            "dx": dx if dx else None,
+            "notches": notches,
+            "direction": direction,
+            "amount": amount,
+        })
+        nv, nh = req["notches"], req["h_notches"]
+        if nv == 0 and nh == 0:
+            nv = 3
+        x, y = self._aim_for_wheel(query=query, bbox=bbox)
+        if x is None or y is None:
+            return ActionOutcome(False, False, "no aim point for wheel (focus a window first)",
+                                 elapsed=time.time() - t0, backend="synthetic")
+        pre = self.observe(modes=["diff"], include_image=False, use_cache=False)
+        ok = self._wheel_at(x, y, nv, nh)
+        fallback = None
+        if not ok:
+            # Last resort: PageDown/PageUp. Never Home/End (those jump the caret).
+            key = "pagedown" if nv > 0 else "pageup" if nv < 0 else None
+            if key:
+                try:
+                    self.smart_hotkey([key])
+                    ok = True
+                    fallback = key
+                except Exception:
+                    pass
+        time.sleep(0.12)
         try:
             self._uia().invalidate(self._focus_pid, self._focus_window_id)
         except Exception:
             pass
         post = self.observe(modes=["diff"], include_image=False, use_cache=False)
         changed = self._verify_change(pre, post)
-        return ActionOutcome(ok, changed, f"Scrolled dx={dx} dy={dy}", elapsed=time.time()-t0, backend="local")
+        extra = f" fallback={fallback}" if fallback else ""
+        return ActionOutcome(
+            ok, changed,
+            f"wheel notches={nv} h={nh} at=({x},{y}){extra}",
+            elapsed=time.time() - t0,
+            backend="synthetic",
+        )
+
+    def scroll_into_view(
+        self,
+        query: Optional[str] = None,
+        bbox: Optional[list] = None,
+        max_steps: int = 12,
+    ) -> Dict[str, Any]:
+        """Wheel until query/bbox is inside the focused window document."""
+        from .pointer import bbox_visible, notches_toward, viewport_from_rect, NOTCHES_PAGE
+
+        st = self.window_state(self._focus_window_id)
+        rect = st.get("rect") if isinstance(st, dict) else None
+        if not rect:
+            return {"ok": False, "error": "no focused window rect"}
+        title = ""
+        try:
+            title = str(self._uia().get_tree(self._focus_pid, self._focus_window_id).title or "")
+        except Exception:
+            pass
+        chrome = 90 if any(k in title.lower() for k in ("chrome", "edge", "helium", "firefox", "brave")) else 48
+        viewport = viewport_from_rect(rect, chrome_top=chrome)
+        steps_done = 0
+        last_box = list(bbox) if bbox and len(bbox) >= 4 else None
+        for i in range(max(1, int(max_steps))):
+            if query and not last_box:
+                hits = self.find_targets(query)
+                if hits and hits[0].bbox:
+                    last_box = list(hits[0].bbox)
+            if last_box and bbox_visible(last_box, viewport):
+                return {
+                    "ok": True,
+                    "visible": True,
+                    "bbox": last_box,
+                    "steps": steps_done,
+                    "viewport": list(viewport),
+                }
+            if last_box:
+                n = notches_toward(last_box, viewport, step=NOTCHES_PAGE)
+            else:
+                n = NOTCHES_PAGE
+            if n == 0:
+                n = NOTCHES_PAGE
+            x, y = self._aim_for_wheel(bbox=last_box)
+            if x is None:
+                return {"ok": False, "error": "no aim point", "steps": steps_done}
+            self._wheel_at(x, y, n, 0)
+            steps_done += 1
+            time.sleep(0.12)
+            try:
+                self._uia().invalidate(self._focus_pid, self._focus_window_id)
+            except Exception:
+                pass
+            last_box = None
+        hits = self.find_targets(query) if query else []
+        box = list(hits[0].bbox) if hits and hits[0].bbox else last_box
+        vis = bool(box and bbox_visible(box, viewport))
+        return {
+            "ok": vis,
+            "visible": vis,
+            "bbox": box,
+            "steps": steps_done,
+            "viewport": list(viewport),
+            "error": None if vis else "target not on screen after wheel",
+        }
+
+    def hover(self, query: Optional[str] = None, x: Optional[int] = None, y: Optional[int] = None) -> ActionOutcome:
+        t0 = time.time()
+        if x is None or y is None:
+            if query:
+                hits = self.find_targets(query)
+                if hits and hits[0].center:
+                    x, y = hits[0].center
+        if x is None or y is None:
+            return ActionOutcome(False, False, "hover needs query or x,y", elapsed=0.0, backend="synthetic")
+        try:
+            from .synthetic.inject_win import move_human
+            ok = move_human(int(x), int(y))
+        except Exception as exc:
+            return ActionOutcome(False, False, str(exc), elapsed=time.time() - t0, backend="synthetic")
+        time.sleep(0.04)
+        return ActionOutcome(ok, False, f"hover ({int(x)},{int(y)})", elapsed=time.time() - t0, backend="synthetic")
 
     def smart_drag(self, start_query: Optional[str] = None, end_query: Optional[str] = None,
                    start: Optional[List[int]] = None, end: Optional[List[int]] = None,
@@ -1366,7 +1545,18 @@ class SmartController:
                 elif op == "type":
                     out = self.smart_type(text=act.get("text", ""), query=act.get("query"), clear=act.get("clear", False))
                 elif op == "scroll":
-                    out = self.smart_scroll(dy=act.get("dy", 600), dx=act.get("dx", 0), query=act.get("query"))
+                    out = self.smart_scroll(
+                        dy=act.get("dy") or 0,
+                        dx=act.get("dx") or 0,
+                        query=act.get("query"),
+                        notches=act.get("notches"),
+                        direction=act.get("direction") or act.get("dir"),
+                        amount=act.get("amount"),
+                    )
+                elif op in {"scroll_into_view", "into_view"}:
+                    out = self.scroll_into_view(query=act.get("query"), bbox=act.get("bbox"))
+                elif op == "hover":
+                    out = self.hover(query=act.get("query"), x=act.get("x"), y=act.get("y"))
                 elif op == "hotkey":
                     out = self.smart_hotkey(act.get("keys") or [])
                 elif op == "drag":
@@ -2132,6 +2322,10 @@ class SmartController:
                 "parallel_cursor_queues": True,
                 "start_menu_launch": sys.platform == "win32",
                 "smart_scroll_drag": True,
+                "sendinput_wheel": True,
+                "scroll_into_view": True,
+                "hover": True,
+                "live_eyes": True,
                 "windows_browser_spaces": HAS_BROWSER,
             },
         }

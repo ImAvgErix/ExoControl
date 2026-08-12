@@ -3,17 +3,17 @@
 ## GitHub (wheel / sdist)
 
 ```bash
-git tag -a v2.0.0 -m "Exo Control v2.0.0"
-git push origin v2.0.0
-gh release create v2.0.0 --title "v2.0.0" --generate-notes
+git tag -a v2.1.0 -m "Exo Control v2.1.0"
+git push origin v2.1.0
+gh release create v2.1.0 --title "v2.1.0" --generate-notes
 python -m build
-gh release upload v2.0.0 dist/exo_control-2.0.0*
+gh release upload v2.1.0 dist/exo_control-2.1.0*
 ```
 
 Install from tag until PyPI is live:
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0"
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"
 ```
 
 ## PyPI trusted publisher
@@ -34,7 +34,7 @@ PyPI pending publisher is **registered** (2026-08-12) on account **UhhErix**:
 The first successful `publish.yml` run creates the project and turns this pending publisher into an ordinary one.
 
 ```bash
-# after 2.0 is on origin/main (or a release tag):
+# after 2.1 is on origin/main (or a release tag):
 gh workflow run publish.yml -R ImAvgErix/ExoControl
 ```
 
