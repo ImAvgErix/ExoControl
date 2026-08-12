@@ -50,7 +50,7 @@ LEASE_REQUIRED_OPS = frozenset({
     "proc_kill",
 })
 
-# Read-only / lease-management ops (no lease required). Documented in docs/JARVIS.md.
+# Read-only / lease-management ops (no lease required). Documented in docs/LIVE-MODEL.md.
 LEASE_FREE_OPS = frozenset({
     "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
     "monitors", "list_monitors",

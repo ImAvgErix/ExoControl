@@ -1,7 +1,7 @@
 # Aether v1.4 Architecture
 
 ```
-Agent (Grok / Hermes / Claude / Codex)
+Agent (any model / any harness)
         │ MCP
         ▼
  SmartController

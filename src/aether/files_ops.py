@@ -1,4 +1,4 @@
-"""Allowrooted file ops for Jarvis OS."""
+"""Allowrooted file ops for Exo Control."""
 from __future__ import annotations
 
 import json

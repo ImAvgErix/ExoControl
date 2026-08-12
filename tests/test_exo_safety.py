@@ -1,4 +1,4 @@
-"""JARVIS 1.7 safety: verify fail-closed, kill switch, rate limits, destructive gate,
+"""Exo Control safety: verify fail-closed, kill switch, rate limits, destructive gate,
 browser_snapshot stub, action_log, cross-engine lease release.
 """
 from __future__ import annotations

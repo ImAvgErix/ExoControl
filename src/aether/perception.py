@@ -1,5 +1,5 @@
 """
-Aether Driver - Perception Layer (Eyes)
+Exo Control - Perception Layer (Eyes)
 Hybrid screen observation: screenshot + OCR + simple vision elements + diff.
 Designed to be extended with OmniParser, UI-TARS, platform a11y, continuous capture.
 """
@@ -56,7 +56,7 @@ class BBox:
 
 
 class PerceptionEngine:
-    """Core eyes for Aether Driver."""
+    """Core eyes for Exo Control."""
 
     def __init__(self, use_ocr: bool = True, ocr_engine: str = "auto"):
         self.use_ocr = use_ocr

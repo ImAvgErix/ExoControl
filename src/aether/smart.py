@@ -480,7 +480,7 @@ class SmartController:
             return None
 
     def focus_window(self, pid: "int | str", window_id: Optional[int] = None) -> Dict[str, Any]:
-        # Jarvis convenience: title substring is accepted as well as pid.
+        # Convenience: title substring is accepted as well as pid.
         if isinstance(pid, str):
             return self.smart_focus(title=pid)
         self._focus_pid = pid

@@ -40,5 +40,5 @@ Env: `PYTHONPATH` must include the package `src` (or `pip install -e .`). `AETHE
 
 - `AGENTS.md` — drop into any agent context
 - `docs/HARNESS.md` — install for every host
-- `docs/JARVIS-OS.md` — capability bar
+- `docs/CAPABILITY.md` — capability bar
 - `SECURITY.md` — hard stops

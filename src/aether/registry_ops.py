@@ -1,4 +1,4 @@
-"""Windows registry ops for Jarvis OS (winreg)."""
+"""Windows registry ops for Exo Control (winreg)."""
 from __future__ import annotations
 
 import sys

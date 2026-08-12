@@ -49,4 +49,4 @@ Installed at `%LOCALAPPDATA%\ExoLauncher\app\ExoLauncher.exe`. Prefer CDP/DOM wh
 ]
 ```
 
-Full catalog: [docs/HARNESS.md](docs/HARNESS.md) · capability bar: [docs/JARVIS-OS.md](docs/JARVIS-OS.md)
+Full catalog: [docs/HARNESS.md](docs/HARNESS.md) · capability bar: [docs/CAPABILITY.md](docs/CAPABILITY.md)

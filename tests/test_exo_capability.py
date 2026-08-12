@@ -1,4 +1,4 @@
-"""Jarvis OS P0 CODE: compact eyes, files allowroot, registry, infra gates."""
+"""Exo Control capability P0: compact eyes, files allowroot, registry, infra gates."""
 from __future__ import annotations
 
 import json
@@ -156,11 +156,11 @@ def test_files_outside_root_gates(lease_home, monkeypatch):
 
 
 def test_registry_gates(lease_home, monkeypatch):
-    missing = registry_ops.registry_read(r"HKCU\Software\AetherJarvisOSDoesNotExist\Missing")
+    missing = registry_ops.registry_read(r"HKCU\Software\ExoControlDoesNotExist\Missing")
     assert missing["ok"] is False
 
     no_confirm = registry_ops.registry_write(
-        r"HKCU\Software\AetherJarvisOSTest",
+        r"HKCU\Software\ExoControlTest",
         name="Flag",
         value="1",
         confirm=False,
@@ -169,7 +169,7 @@ def test_registry_gates(lease_home, monkeypatch):
     assert "confirm" in no_confirm["error"]
 
     hklm = registry_ops.registry_write(
-        r"HKLM\Software\AetherJarvisOSTest",
+        r"HKLM\Software\ExoControlTest",
         name="Flag",
         value="1",
         confirm=True,
@@ -184,7 +184,7 @@ def test_registry_gates(lease_home, monkeypatch):
             {"op": "lease_acquire", "agent": "r", "task": "reg", "ttl_sec": 30},
             {
                 "op": "registry_write",
-                "path": r"HKCU\Software\AetherJarvisOSTest",
+                "path": r"HKCU\Software\ExoControlTest",
                 "name": "P0",
                 "value": "1",
                 "type": "string",

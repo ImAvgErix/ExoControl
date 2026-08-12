@@ -18,7 +18,7 @@ def lease_home(tmp_path, monkeypatch):
     yield tmp_path
 
 
-class JarvisStub(SmartController):
+class ExoStub(SmartController):
     def __init__(self):
         self._focus_pid = 1
         self._focus_window_id = 10
@@ -120,7 +120,7 @@ def test_lease_acquire_conflict_expire_release(lease_home):
 
 
 def test_mutating_ops_require_lease(lease_home):
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     denied = eng.execute([{"op": "keys", "keys": "ctrl+l"}])
     assert denied["ok"] is False
     assert denied["steps"][0]["result"]["error"] == "desktop lease required"
@@ -137,7 +137,7 @@ def test_mutating_ops_require_lease(lease_home):
 
 
 def test_readonly_ops_no_lease(lease_home, monkeypatch):
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     monkeypatch.setenv("AETHER_FILE_ROOTS", str(lease_home))
     monkeypatch.setattr(
         "aether.exo_bridge.discover_cdp_endpoints",
@@ -165,7 +165,7 @@ def test_wait_cdp_stub(lease_home, monkeypatch):
         return [{"port": 9229, "endpoint": "http://127.0.0.1:9229", "browser": "x", "targets": []}]
 
     monkeypatch.setattr("aether.exo_bridge.discover_cdp_endpoints", fake)
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     result = eng.execute([{"op": "wait_cdp", "timeout": 5, "poll": 0.01, "port": 9229}])
     assert result["ok"] is True
     assert result["steps"][0]["result"]["count"] == 1
@@ -176,7 +176,7 @@ def test_eyes_stub(lease_home, monkeypatch):
         "aether.exo_bridge.discover_cdp_endpoints",
         lambda extra_ports=None: [{"port": 9333, "endpoint": "http://127.0.0.1:9333", "browser": "Edge", "targets": [1]}],
     )
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     out = eng.execute([{"op": "eyes"}])["steps"][0]["result"]
     assert out["ok"] is True
     assert out["observe"]["a11y_labels"] == ["A"]
@@ -184,7 +184,7 @@ def test_eyes_stub(lease_home, monkeypatch):
 
 
 def test_focus_window_accepts_title_string():
-    c = JarvisStub()
+    c = ExoStub()
     assert c.focus_window("Exo Launcher")["ok"] is True
 
 
@@ -193,11 +193,11 @@ def test_screenshot_path_and_cdp_ops(tmp_path, lease_home, monkeypatch):
         "aether.exo_bridge.discover_cdp_endpoints",
         lambda extra_ports=None: [{"port": 9229, "endpoint": "http://127.0.0.1:9229", "browser": "stub", "targets": []}],
     )
-    eng = AetherExecEngine(controller=JarvisStub())
-    out = str(tmp_path / "jarvis-shot-test.png")
+    eng = AetherExecEngine(controller=ExoStub())
+    out = str(tmp_path / "exo-shot-test.png")
     result = eng.execute(
         [
-            {"op": "lease_acquire", "agent_id": "jarvis", "task": "shot", "ttl_sec": 60},
+            {"op": "lease_acquire", "agent_id": "exo-agent", "task": "shot", "ttl_sec": 60},
             {"op": "shot", "path": out, "title": "Exo Launcher"},
             {"op": "cdp_discover"},
             {"op": "keys", "keys": "ctrl+l"},
@@ -210,7 +210,7 @@ def test_screenshot_path_and_cdp_ops(tmp_path, lease_home, monkeypatch):
 
 
 def test_window_ops_dispatch_to_controller(lease_home):
-    stub = JarvisStub()
+    stub = ExoStub()
     eng = AetherExecEngine(controller=stub)
     result = eng.execute(
         [
@@ -228,7 +228,7 @@ def test_window_ops_dispatch_to_controller(lease_home):
 
 
 def test_launch_op_uses_popen(lease_home, monkeypatch):
-    stub = JarvisStub()
+    stub = ExoStub()
     eng = AetherExecEngine(controller=stub)
     fake = MagicMock()
     fake.pid = 4321
@@ -256,7 +256,7 @@ def test_apps_and_files_list(lease_home, monkeypatch):
         "aether.exec_engine._list_apps",
         lambda max_items=80: {"ok": True, "apps": [{"pid": 1, "title": "Demo", "exe": r"C:\Demo.exe", "hwnd": 9}], "count": 1},
     )
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     result = eng.execute(
         [
             {"op": "apps"},
@@ -270,7 +270,7 @@ def test_apps_and_files_list(lease_home, monkeypatch):
 
 
 def test_proc_kill_requires_confirm(lease_home, monkeypatch):
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     denied = eng.execute(
         [
             {"op": "lease_acquire", "agent_id": "p", "task": "kill", "ttl_sec": 30},
@@ -301,7 +301,7 @@ def test_proc_kill_requires_confirm(lease_home, monkeypatch):
 
 def test_notify_stubs_subprocess(lease_home, monkeypatch):
     monkeypatch.setenv("AETHER_NOTIFY_STUB", "1")
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     # Explicit stub still works; env stub only honored under pytest.
     result = eng.execute([{"op": "notify", "title": "Aether", "message": "hello", "stub": True}])
     assert result["ok"] is True
@@ -315,7 +315,7 @@ def test_clipboard_image_save(tmp_path, lease_home, monkeypatch):
     img = Image.new("RGB", (4, 4), color=(9, 8, 7))
     monkeypatch.setattr("PIL.ImageGrab.grabclipboard", lambda: img)
     out = tmp_path / "clip.png"
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     result = eng.execute([{"op": "clipboard_image_save", "path": str(out)}])
     assert result["ok"] is True
     assert out.is_file()
@@ -332,7 +332,7 @@ def test_desktop_unsupported_without_pyvda(lease_home, monkeypatch):
         return real_import(name, *a, **k)
 
     monkeypatch.setattr(builtins, "__import__", guarded)
-    eng = AetherExecEngine(controller=JarvisStub())
+    eng = AetherExecEngine(controller=ExoStub())
     result = eng.execute([{"op": "desktop", "action": "list"}])
     assert result["steps"][0]["result"]["ok"] is False
     assert result["steps"][0]["result"]["error"] == "unsupported"

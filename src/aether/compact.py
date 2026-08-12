@@ -1,4 +1,4 @@
-"""Compact-by-default payload shaping for Jarvis OS eyes/snapshot ops."""
+"""Compact-by-default payload shaping for Exo Control eyes/snapshot ops."""
 from __future__ import annotations
 
 import json

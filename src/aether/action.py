@@ -1,5 +1,5 @@
 """
-Aether Driver - Action Layer (Hands)
+Exo Control - Action Layer (Hands)
 Cross-platform mouse/keyboard via pynput. 
 Note: This moves the real cursor (reliable but not background).
 For true background synthetic cursors, integrate Cua Driver, xa11y, or platform HID.
@@ -27,7 +27,7 @@ except Exception:
 
 
 class ActionEngine:
-    """Hands for Aether Driver. Prefer element targets when available."""
+    """Hands for Exo Control. Prefer element targets when available."""
 
     def __init__(self, backend: str = "pynput", failsafe: bool = True):
         self.backend = backend

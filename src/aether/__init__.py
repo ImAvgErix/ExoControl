@@ -1,4 +1,4 @@
-"""Exo Control v1.0.1 — any AI, any harness (MCP + CLI + Python); Jarvis OS complete."""
+"""Exo Control v1.0.1 — realtime PC eyes/hands for any AI (MCP + CLI + Python)."""
 __version__ = "1.0.1"
 from .perception import PerceptionEngine
 from .action import ActionEngine

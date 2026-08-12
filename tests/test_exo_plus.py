@@ -1,5 +1,5 @@
 
-"""Jarvis+ 1.8.0: notify real path, clipboard image set, browser text click, wait_window."""
+"""Exo Control Plus: notify real path, clipboard image set, browser text click, wait_window."""
 from __future__ import annotations
 
 from pathlib import Path

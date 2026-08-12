@@ -1,4 +1,4 @@
-"""Regressions from Jarvis OS 1.9.0 re-prove gaps."""
+"""Regressions from Exo Control capability re-prove gaps."""
 from __future__ import annotations
 
 from pathlib import Path

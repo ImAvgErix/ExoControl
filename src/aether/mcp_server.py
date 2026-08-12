@@ -1,4 +1,4 @@
-"""Aether Driver full compatibility MCP v1.4 — realtime eyes + cached UIA hands."""
+"""Exo Control full compatibility MCP — realtime eyes + cached UIA hands."""
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 

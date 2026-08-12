@@ -144,3 +144,7 @@ Optional live path used by some agents:
 ```
 
 Keep it synced with this repo (or `pip install -e .` into the interpreter the harness uses).
+
+## Versioning
+
+Exo Control is a **library** (`pip install -e .`). There is no Setup.exe and no GitHub Release assets. Version is in `pyproject.toml`; use git history for changes. Binary installers live on [Exo Launcher](https://github.com/ImAvgErix/ExoLauncher) only.

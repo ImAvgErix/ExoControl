@@ -1,4 +1,4 @@
-"""Simple runtime config for Aether Driver."""
+"""Simple runtime config for Exo Control."""
 from __future__ import annotations
 import json
 from dataclasses import dataclass, asdict, field
