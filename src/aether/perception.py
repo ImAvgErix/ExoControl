@@ -293,7 +293,7 @@ class PerceptionEngine:
                        include_image: bool = True, max_image_side: int = 1024) -> dict:
         """Faster observe of a screen rectangle (for verify around a click)."""
         from PIL import Image
-        full = self._capture(monitor=1)
+        full = self.capture(monitor=1)
         if full is None:
             return self.observe(modes=modes or ["diff"], include_image=False)
         x1, y1 = max(0, x1), max(0, y1)

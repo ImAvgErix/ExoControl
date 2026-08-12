@@ -44,8 +44,8 @@ class JarvisStub(SmartController):
     def status(self):
         return {"ok": True}
 
-    def smart_focus(self, title=None, pid=None):
-        return {"ok": True, "pid": 1, "window_id": 10, "title": title or "X", "raised": True}
+    def smart_focus(self, title=None, pid=None, monitor=None):
+        return {"ok": True, "pid": 1, "window_id": 10, "title": title or "X", "raised": True, "monitor": monitor}
 
     def focus_window(self, pid, window_id=None):
         if isinstance(pid, str):

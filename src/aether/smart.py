@@ -193,6 +193,7 @@ class SmartController:
         self._focus_pid: Optional[int] = None
         self._focus_window_id: Optional[int] = None
         self._focus_rect: Optional[Tuple[int, int, int, int]] = None
+        self._focus_monitor: Optional[int] = None
         self._browser = None
         self._metrics = {"clicks": 0, "types": 0, "batches": 0, "memory_hits": 0, "waits": 0, "fills": 0}
         self._timings: Dict[str, Dict[str, Any]] = {}
@@ -430,6 +431,10 @@ class SmartController:
     # ── Eyes ────────────────────────────────────────────────────────
 
     def observe(self, use_cache: bool = False, **kwargs) -> Dict[str, Any]:
+        mon = kwargs.get("monitor")
+        if mon is None and self._focus_monitor is not None:
+            kwargs = dict(kwargs)
+            kwargs["monitor"] = int(self._focus_monitor)
         out = (self.perception.observe_cached(**kwargs) if use_cache
                else self.perception.observe(**kwargs))
         # PerceptionEngine reports a11y as unwired; it is wired here via UIA.
@@ -446,13 +451,33 @@ class SmartController:
                 }
         except Exception:
             pass
+        if isinstance(out, dict) and kwargs.get("monitor") is not None:
+            out["monitor"] = int(kwargs["monitor"])
         return out
 
-    def list_windows(self) -> List[Dict[str, Any]]:
+    def list_windows(self, monitor: Optional[int] = None) -> List[Dict[str, Any]]:
         try:
-            return self._uia().list_windows()
+            windows = self._uia().list_windows()
         except Exception:
-            return self.backend.list_windows()
+            windows = self.backend.list_windows()
+        if monitor is None:
+            return windows
+        from .monitors import filter_windows_for_monitor
+        hits, mon = filter_windows_for_monitor(list(windows or []), int(monitor))
+        if mon is None:
+            return []
+        return hits
+
+    def _focus_process_name(self) -> Optional[str]:
+        pid = self._focus_pid
+        if pid is None:
+            return None
+        try:
+            import psutil  # type: ignore
+            from pathlib import Path as _P
+            return _P(psutil.Process(int(pid)).name()).stem.lower()
+        except Exception:
+            return None
 
     def focus_window(self, pid: "int | str", window_id: Optional[int] = None) -> Dict[str, Any]:
         # Jarvis convenience: title substring is accepted as well as pid.
@@ -461,7 +486,7 @@ class SmartController:
         self._focus_pid = pid
         self._focus_window_id = window_id
         try:
-            self._get_eyes().set_focus_hint(pid, window_id)
+            self._get_eyes().set_focus_hint(pid, window_id, monitor=self._focus_monitor)
         except Exception:
             pass
         if window_id is None:
@@ -496,9 +521,13 @@ class SmartController:
     ) -> List[Target]:
         targets: List[Target] = []
 
-        # Memory boost
+        # Memory boost (process-name key survives PID recycle across relaunch)
         if use_memory:
-            hit = self.memory.lookup(query, self._focus_pid)
+            hit = self.memory.lookup(
+                query,
+                self._focus_pid,
+                process_name=self._focus_process_name(),
+            )
             if hit:
                 self._metrics["memory_hits"] += 1
                 targets.append(Target(
@@ -508,8 +537,10 @@ class SmartController:
                     x=hit.x, y=hit.y,
                     confidence=min(0.92, 0.55 + hit.score * 0.4),
                     source="memory",
-                    pid=hit.pid, window_id=hit.window_id,
+                    pid=hit.pid or self._focus_pid,
+                    window_id=hit.window_id or self._focus_window_id,
                     element_index=hit.element_index,
+                    meta={"process_name": hit.process_name},
                 ))
 
         # Fast path: shared UIA cache (avoids cold Desktop walks)
@@ -763,7 +794,9 @@ class SmartController:
             targets.append(Target(kind="coords", label=f"({x},{y})", x=x, y=y, confidence=0.55, source="coords"))
         if not targets:
             if query:
-                self.memory.record_failure(query, self._focus_pid)
+                self.memory.record_failure(
+                    query, self._focus_pid, process_name=self._focus_process_name()
+                )
             return ActionOutcome(False, False, f"No targets for {query!r}",
                                  elapsed=time.time()-t0, backend=self.backend_name)
 
@@ -775,12 +808,18 @@ class SmartController:
             targets = [t for t in targets if t.confidence >= best - 0.08]
 
         last_msg = ""
+        used_memory = False
         for attempt, target in enumerate(targets[: self.max_retries + 1], start=1):
+            if target.source == "memory":
+                used_memory = True
             pre_hash = self.ui_hash() if (require_change and target.is_a11y) else ""
             delivery = self._deliver_click(target=target, button=button)
             # a11y invoke is authoritative — skip expensive verify unless required.
             if delivery.ok and target.is_a11y and not require_change:
                 if query:
+                    if not isinstance(target.meta, dict):
+                        target.meta = {}
+                    target.meta.setdefault("process_name", self._focus_process_name())
                     self.memory.record_success(query, target)
                 self.log.record("click", query=query, label=target.label, backend=delivery.backend, success=True)
                 if self.macros.is_recording():
@@ -806,6 +845,9 @@ class SmartController:
                         break
                 if changed:
                     if query:
+                        if not isinstance(target.meta, dict):
+                            target.meta = {}
+                        target.meta.setdefault("process_name", self._focus_process_name())
                         self.memory.record_success(query, target)
                     self.log.record("click", query=query, label=target.label,
                                     backend=delivery.backend, success=True)
@@ -826,6 +868,9 @@ class SmartController:
             changed = self._verify_change(pre, post) if (self.verify and pre) else True
             if delivery.ok and (not self.verify or changed or not require_change):
                 if query:
+                    if not isinstance(target.meta, dict):
+                        target.meta = {}
+                    target.meta.setdefault("process_name", self._focus_process_name())
                     self.memory.record_success(query, target)
                 self.log.record("click", query=query, label=target.label, backend=delivery.backend, success=True)
                 if self.macros.is_recording():
@@ -841,7 +886,11 @@ class SmartController:
             last_msg = f"Attempt {attempt} '{target.label}' ok={delivery.ok} changed={changed}"
             pre = post
         if query:
-            self.memory.record_failure(query, self._focus_pid)
+            proc = self._focus_process_name()
+            self.memory.record_failure(query, self._focus_pid, process_name=proc)
+            # Invalidate-on-miss: memory hits that failed must not stick across relaunch.
+            if used_memory:
+                self.memory.invalidate(query)
         self._record_stat("smart_click", time.time() - t0, ok=False)
         return ActionOutcome(False, False, last_msg or "all attempts failed",
                              attempts=min(len(targets), self.max_retries+1),
@@ -1253,7 +1302,7 @@ class SmartController:
         annotated = None
         try:
             # re-capture for pixels
-            img = self.perception._capture(monitor=1)
+            img = self.perception.capture(monitor=self._focus_monitor or 1)
             if img is not None:
                 annotated = annotate_to_base64(img, elements, quality=65)
         except Exception:
@@ -1269,9 +1318,27 @@ class SmartController:
         return self.log.tail(n)
 
 
-    def smart_focus(self, title: Optional[str] = None, pid: Optional[int] = None) -> Dict[str, Any]:
-        """Focus a window by title substring or pid; sets a11y context for subsequent clicks."""
+    def smart_focus(
+        self,
+        title: Optional[str] = None,
+        pid: Optional[int] = None,
+        monitor: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Focus a window by title substring or pid; sets a11y context for subsequent clicks.
+
+        When ``monitor`` is set, only windows whose center/overlap lives on that
+        display are candidates; miss = fail closed with monitor inventory.
+        """
+        from .monitors import filter_windows_for_monitor, monitor_bind_error, window_on_monitor, get_monitor
+
         windows = self.list_windows()
+        mon_info = None
+        mon_id = int(monitor) if monitor is not None else None
+        if mon_id is not None:
+            filtered, mon_info = filter_windows_for_monitor(windows, mon_id)
+            if mon_info is None:
+                return monitor_bind_error(mon_id, "unknown monitor id")
+            windows = filtered
         match = None
         if pid is not None:
             for w in windows:
@@ -1299,7 +1366,14 @@ class SmartController:
                 candidates.sort(key=lambda item: item[0], reverse=True)
                 match = candidates[0][1]
         if match is None:
+            if mon_id is not None:
+                return monitor_bind_error(
+                    mon_id,
+                    "no window on monitor" + (f" matching {title!r}" if title else ""),
+                )
             return {"ok": False, "error": "window not found", "windows": windows[:12]}
+        if mon_info is not None and not window_on_monitor(match, mon_info):
+            return monitor_bind_error(mon_id or 0, "matched window not on requested monitor")
         wpid = match.get("pid") or match.get("process_id")
         wid = match.get("window_id") or match.get("handle")
         try:
@@ -1314,13 +1388,19 @@ class SmartController:
         if wpid is not None:
             fr = self.focus_window(wpid, wid)
             raised = bool(fr.get("raised"))
+        self._focus_monitor = mon_id
         if self.macros.is_recording():
-            self.macros.add("focus", title=title, pid=wpid, window_id=wid)
-        return {
+            self.macros.add("focus", title=title, pid=wpid, window_id=wid, monitor=mon_id)
+        out = {
             "ok": True, "pid": wpid, "window_id": wid,
             "title": match.get("title") or match.get("name"),
             "raised": raised,
+            "rect": match.get("rect"),
         }
+        if mon_id is not None:
+            out["monitor"] = mon_id
+            out["monitor_info"] = mon_info or get_monitor(mon_id)
+        return out
 
     def wait_gone(self, query: str, timeout: float = 15.0, poll: float = 0.45) -> ActionOutcome:
         """Wait until a target is not visible (a11y/OCR). Dead target window counts as gone."""
@@ -1407,24 +1487,63 @@ class SmartController:
                 return ActionOutcome(True, True, "Screen changed", elapsed=time.time() - t0, backend=self.backend_name)
         return ActionOutcome(False, False, "No change detected", elapsed=time.time() - t0, backend=self.backend_name)
 
-    def compact_observe(self, include_ocr: bool = True, max_ocr: int = 40, max_elements: int = 30) -> Dict[str, Any]:
-        """Token-efficient observation for LLM agents (a11y-first, optional OCR)."""
+    def compact_observe(
+        self,
+        include_ocr: bool = True,
+        max_ocr: int = 40,
+        max_elements: int = 30,
+        monitor: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Token-efficient observation for LLM agents (a11y-first, optional OCR).
+
+        When ``monitor`` is set, OCR/vision bind to that display. If a window is
+        focused and does not live on that monitor, fail closed.
+        """
+        from .monitors import get_monitor, monitor_bind_error, rect_on_monitor
+
         t0 = time.time()
+        mon_id = int(monitor) if monitor is not None else self._focus_monitor
+        mon_info = get_monitor(mon_id) if mon_id is not None else None
+        if mon_id is not None and mon_info is None:
+            return monitor_bind_error(mon_id, "unknown monitor id")
+
+        # Only fail-closed on explicit agent focus — read_ui may adopt the
+        # foreground HWND and must not poison monitor-bound OCR.
+        explicit_focus = self._focus_pid is not None or self._focus_window_id is not None
+        if mon_info is not None and explicit_focus:
+            rect = self._focus_rect
+            try:
+                st = self.window_state(self._focus_window_id)
+                if isinstance(st, dict) and st.get("rect"):
+                    rect = st.get("rect")
+            except Exception:
+                pass
+            if rect and not rect_on_monitor(rect, mon_info):
+                return monitor_bind_error(
+                    int(mon_id),
+                    "focused window not on requested monitor",
+                )
+
         ui = self.read_ui()
+
         ocr: List[Dict[str, Any]] = []
         els: List[Dict[str, Any]] = []
         if include_ocr:
             # Prefer realtime buffer if running; else one cheap OCR pass
             eyes = self._get_eyes()
-            if eyes._running:
+            if eyes._running and mon_id is None:
                 frame = eyes.read_now(force_ocr=False)
                 ocr = frame.get("labels") or []
             else:
-                obs = self.observe(modes=["ocr"], include_image=False, use_cache=True)
+                obs_kw: Dict[str, Any] = {"modes": ["ocr"], "include_image": False, "use_cache": True}
+                if mon_id is not None:
+                    obs_kw["monitor"] = int(mon_id)
+                    obs_kw["use_cache"] = False
+                obs = self.observe(**obs_kw)
                 ocr = (obs.get("vision") or {}).get("ocr") or []
                 els = (obs.get("vision") or {}).get("elements") or []
         a11y_els = ui.get("elements") or []
-        return {
+        out: Dict[str, Any] = {
             "backend": self.backend_name,
             "focus_pid": self._focus_pid or ui.get("pid"),
             "title": ui.get("title"),
@@ -1449,6 +1568,10 @@ class SmartController:
             "elapsed": round(time.time() - t0, 3),
             "cached_tree": True,
         }
+        if mon_id is not None:
+            out["monitor"] = int(mon_id)
+            out["monitor_info"] = mon_info
+        return out
 
     def stats(self, reset: bool = False) -> Dict[str, Any]:
         """Live latency and reliability counters for the current session."""
@@ -1578,7 +1701,7 @@ class SmartController:
         cua_ok = isinstance(self.backend, CuaBackend)
         eyes_running = bool(self._eyes and getattr(self._eyes, "_running", False))
         return {
-            "version": "1.8.0",
+            "version": "1.0.0",
             "backend": self.backend_name,
             "backend_class": type(self.backend).__name__,
             "cua_active": cua_ok,
@@ -1607,6 +1730,8 @@ class SmartController:
                 "frame_diff_verify": True,
                 "auto_retry": True,
                 "ui_memory": True,
+                "ui_memory_persist": True,
+                "multi_monitor": True,
                 "observation_cache": True,
                 "batch_actions": True,
                 "wait_until": True,
@@ -1627,6 +1752,7 @@ class SmartController:
                 "uia_invoke": True,
                 "ax_mac": True,
                 "parallel_cursor_queues": True,
+                "start_menu_launch": True,
                 "smart_scroll_drag": True,
                 "windows_browser_spaces": HAS_BROWSER,
             },

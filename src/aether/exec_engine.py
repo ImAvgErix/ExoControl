@@ -53,6 +53,7 @@ LEASE_REQUIRED_OPS = frozenset({
 # Read-only / lease-management ops (no lease required). Documented in docs/JARVIS.md.
 LEASE_FREE_OPS = frozenset({
     "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
+    "monitors", "list_monitors",
     "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
     "wait_cdp", "wait_for_cdp", "eyes", "apps", "files_list", "files_read",
     "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
@@ -364,7 +365,13 @@ class AetherExecEngine:
         ctrl = self.ctrl
         # Explicit title/pid on the step: focus first, fail if it fails.
         if step.get("title") or step.get("pid") is not None:
-            focused = ctrl.smart_focus(title=step.get("title"), pid=step.get("pid"))
+            mon = step.get("monitor")
+            focused = self._smart_focus(
+                ctrl,
+                title=step.get("title"),
+                pid=step.get("pid"),
+                monitor=int(mon) if mon is not None else None,
+            )
             if not isinstance(focused, dict) or not focused.get("ok"):
                 return {
                     "ok": False,
@@ -384,6 +391,28 @@ class AetherExecEngine:
                 "blocked": True,
             }
         return None
+
+    def _smart_focus(
+        self,
+        ctrl: Any,
+        *,
+        title: Any = None,
+        pid: Any = None,
+        monitor: Any = None,
+    ) -> Dict[str, Any]:
+        """Call controller.smart_focus; tolerate stubs without monitor kw."""
+        kwargs: Dict[str, Any] = {}
+        if title is not None:
+            kwargs["title"] = title
+        if pid is not None:
+            kwargs["pid"] = pid
+        if monitor is not None:
+            kwargs["monitor"] = int(monitor)
+        try:
+            return ctrl.smart_focus(**kwargs)
+        except TypeError:
+            kwargs.pop("monitor", None)
+            return ctrl.smart_focus(**kwargs)
 
     def _screenshot_window_bind(
         self, title: Any, focused: Mapping[str, Any], state: Mapping[str, Any]
@@ -412,6 +441,40 @@ class AetherExecEngine:
                             "requested": focused.get("window_id"),
                             "actual": state.get(key),
                         }
+        return None
+
+    def _screenshot_monitor_bind(
+        self,
+        monitor_id: int,
+        focused: Optional[Mapping[str, Any]],
+        state: Mapping[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Fail closed if a bound window does not live on the requested monitor."""
+        from aether.monitors import get_monitor, monitor_bind_error, rect_on_monitor
+
+        mon = get_monitor(int(monitor_id))
+        if mon is None:
+            return monitor_bind_error(int(monitor_id), "unknown monitor id")
+        if not focused and not state:
+            return None  # monitor-only capture is fine
+        rect = None
+        if focused and focused.get("rect"):
+            rect = focused.get("rect")
+        elif state.get("rect"):
+            rect = state.get("rect")
+        if rect is None:
+            # No rect to verify — only fail when title was bound and we cannot confirm.
+            if focused and focused.get("ok") is False:
+                return monitor_bind_error(int(monitor_id), "focus failed on monitor")
+            return None
+        if not rect_on_monitor(rect, mon):
+            return {
+                "ok": False,
+                "error": "screenshot wrong-monitor: window not on requested display",
+                "monitor": int(monitor_id),
+                "rect": rect,
+                "monitors": [mon],
+            }
         return None
 
     def _run_step(self, op: str, step: Dict[str, Any]) -> Any:
@@ -575,15 +638,28 @@ class AetherExecEngine:
         if op == "status":
             return ctrl.status()
         if op in {"windows", "list_windows"}:
+            mon = step.get("monitor")
+            if mon is not None and hasattr(ctrl, "list_windows"):
+                return ctrl.list_windows(monitor=int(mon))
             return ctrl.list_windows()
+        if op in {"monitors", "list_monitors"}:
+            from aether.monitors import list_monitor_dicts
+            mons = list_monitor_dicts()
+            return {"ok": True, "monitors": mons, "count": len(mons)}
         if op in {"focus", "smart_focus"}:
-            focused = ctrl.smart_focus(title=step.get("title"), pid=step.get("pid"))
+            mon = step.get("monitor")
+            focused = self._smart_focus(
+                ctrl,
+                title=step.get("title"),
+                pid=step.get("pid"),
+                monitor=int(mon) if mon is not None else None,
+            )
             token = self._lease_token(step)
             if token and isinstance(focused, dict) and focused.get("ok"):
                 desktop_lease.set_last_focus(
                     token,
                     {"title": focused.get("title"), "pid": focused.get("pid"),
-                     "window_id": focused.get("window_id")},
+                     "window_id": focused.get("window_id"), "monitor": focused.get("monitor")},
                 )
             return focused
         if op in {"read", "read_ui"}:
@@ -593,7 +669,11 @@ class AetherExecEngine:
                 max_elements=int(step.get("max_elements", 120)),
             )
         if op in {"observe", "compact_observe"}:
-            return ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", False)))
+            mon = step.get("monitor")
+            kwargs = {"include_ocr": bool(step.get("include_ocr", False))}
+            if mon is not None:
+                kwargs["monitor"] = int(mon)
+            return ctrl.compact_observe(**kwargs)
         if op in {"click", "smart_click"}:
             return _action_result(
                 ctrl.smart_click(
@@ -758,11 +838,23 @@ class AetherExecEngine:
             # path => write file; otherwise return compact base64 JPEG via engine helper
             out = step.get("path") or step.get("out")
             title = step.get("title")
+            mon = step.get("monitor")
+            mon_id = int(mon) if mon is not None else 1
             focused = None
             if title:
-                focused = ctrl.smart_focus(title=str(title))
+                focused = self._smart_focus(
+                    ctrl,
+                    title=str(title),
+                    monitor=int(mon) if mon is not None else None,
+                )
                 if not focused.get("ok"):
                     return focused
+            if mon is not None:
+                bind_err = self._screenshot_monitor_bind(
+                    mon_id, focused, ctrl.window_state(ctrl._focus_window_id) if title else {},
+                )
+                if bind_err is not None:
+                    return bind_err
             if out:
                 state = ctrl.window_state(ctrl._focus_window_id)
                 if title and focused is not None:
@@ -770,26 +862,36 @@ class AetherExecEngine:
                     if mismatch is not None:
                         return mismatch
                 rect = state.get("rect") if state.get("known") else None
+                # Monitor-only shot (no title): bind to full display region.
+                if mon is not None and not title:
+                    rect = None
                 image = ctrl.perception.capture(
-                    monitor=int(step.get("monitor", 1)),
+                    monitor=mon_id,
                     region=tuple(rect) if rect else None,
                 )
                 if image is None:
                     return {"ok": False, "error": "Screen capture failed."}
                 Path(str(out)).parent.mkdir(parents=True, exist_ok=True)
                 image.save(str(out))
-                return {"ok": True, "path": str(out), "size": list(image.size), "window": state}
+                result = {"ok": True, "path": str(out), "size": list(image.size), "window": state, "monitor": mon_id}
+                return result
             # When title is bound, verify via helper after capture metadata
             shot = self.screenshot(
                 title=None,
-                monitor=int(step.get("monitor", 1)),
+                monitor=mon_id,
                 max_side=int(step.get("max_side", 1600)),
                 quality=int(step.get("quality", 78)),
+                bind_window=bool(title),
             )
             if title and focused is not None and isinstance(shot, dict) and shot.get("ok"):
                 mismatch = self._screenshot_window_bind(title, focused, shot.get("window") or {})
                 if mismatch is not None:
                     return mismatch
+                mon_err = self._screenshot_monitor_bind(mon_id, focused, shot.get("window") or {}) if mon is not None else None
+                if mon_err is not None:
+                    return mon_err
+            if isinstance(shot, dict):
+                shot["monitor"] = mon_id
             return shot
 
         if op in {"cdp", "cdp_discover", "exo_cdp"}:
@@ -860,18 +962,36 @@ class AetherExecEngine:
                     creationflags=creationflags,
                 )
                 out["pid"] = proc.pid
-            # Optional window-ready wait (fuzzy launch -> ready)
+            # Fuzzy launch → ready: wait for window unless caller disables it.
+            # Default ON for app/name/query launches; OFF only when wait_ready=false.
             title = step.get("wait_window") or step.get("title_contains") or step.get("title") or step.get("window_title")
-            if step.get("wait_ready") or title:
+            fuzzy_app = bool(step.get("app") or step.get("name") or step.get("query"))
+            wait_ready = step.get("wait_ready")
+            if wait_ready is None:
+                wait_ready = bool(fuzzy_app or title)
+            if wait_ready or title:
                 from pathlib import Path as _P
-                stem = str(resolved.get("app") or _P(str(command)).stem)
+                stem = str(
+                    resolved.get("matched")
+                    or resolved.get("app")
+                    or _P(str(command)).stem
+                )
+                # Prefer explicit title; else matched Start Menu name; else app stem
+                title_needle = title if (title and not isinstance(title, bool)) else stem
                 ww = {
-                    "title_contains": stem if isinstance(title, bool) else title,
+                    "title_contains": title_needle,
                     "timeout": step.get("timeout", 10.0),
                     "poll": step.get("poll", 0.25),
                 }
+                if out.get("pid"):
+                    ww["pid"] = out["pid"]
                 ready = _wait_window(ctrl, ww)
                 out["window"] = ready
+                if not ready.get("ok") and out.get("pid"):
+                    # PID may exist before title is ready; retry title-only once
+                    ww.pop("pid", None)
+                    ready = _wait_window(ctrl, ww)
+                    out["window"] = ready
                 if not ready.get("ok"):
                     out["ok"] = False
                     out["error"] = ready.get("error") or "window not ready"
@@ -910,7 +1030,12 @@ class AetherExecEngine:
             "window", "window_state",
         }:
             if step.get("title"):
-                focused = ctrl.smart_focus(title=str(step.get("title")))
+                mon = step.get("monitor")
+                focused = self._smart_focus(
+                    ctrl,
+                    title=str(step.get("title")),
+                    monitor=int(mon) if mon is not None else None,
+                )
                 if not focused.get("ok"):
                     return focused
             hwnd = step.get("hwnd") or step.get("window_id")
@@ -1228,13 +1353,24 @@ class AetherExecEngine:
         monitor: int = 1,
         max_side: int = 1600,
         quality: int = 78,
+        bind_window: bool = True,
     ) -> Dict[str, Any]:
+        focused = None
         if title:
-            focused = self.ctrl.smart_focus(title=title)
+            focused = self._smart_focus(self.ctrl, title=title, monitor=monitor)
             if not focused.get("ok"):
                 return focused
+            mon_err = self._screenshot_monitor_bind(monitor, focused, {})
+            if mon_err is not None:
+                return mon_err
         state = self.ctrl.window_state(self.ctrl._focus_window_id)
-        rect = state.get("rect") if state.get("known") else None
+        rect = state.get("rect") if (bind_window and state.get("known")) else None
+        if title and focused is not None:
+            mon_err = self._screenshot_monitor_bind(
+                monitor, focused, state if isinstance(state, dict) else {}
+            )
+            if mon_err is not None:
+                return mon_err
         image = self.ctrl.perception.capture(
             monitor=monitor, region=tuple(rect) if rect else None
         )
@@ -1253,6 +1389,7 @@ class AetherExecEngine:
             "image_base64": base64.b64encode(stream.getvalue()).decode("ascii"),
             "size": list(image.size),
             "window": state,
+            "monitor": int(monitor),
         }
 
 

@@ -57,13 +57,24 @@ class RealtimeEyes:
         self._running = False
         self._prefer_pid: Optional[int] = None
         self._prefer_hwnd: Optional[int] = None
+        self._monitor: int = 1
 
     def attach_perception(self, perception) -> None:
         self._perception = perception
 
-    def set_focus_hint(self, pid: Optional[int] = None, hwnd: Optional[int] = None) -> None:
+    def set_focus_hint(
+        self,
+        pid: Optional[int] = None,
+        hwnd: Optional[int] = None,
+        monitor: Optional[int] = None,
+    ) -> None:
         self._prefer_pid = int(pid) if pid is not None else None
         self._prefer_hwnd = int(hwnd) if hwnd is not None else None
+        if monitor is not None:
+            self._monitor = max(1, int(monitor))
+
+    def set_monitor(self, monitor: int) -> None:
+        self._monitor = max(1, int(monitor))
 
     def start(self) -> Dict[str, Any]:
         if self._running:
@@ -224,14 +235,16 @@ class RealtimeEyes:
         if self.focused_window:
             pid, region, title = self._foreground()
         try:
-            img = self._perception.capture(monitor=1, region=region)
+            mon = int(getattr(self, "_monitor", 1) or 1)
+            img = self._perception.capture(monitor=mon, region=region)
         except Exception:
             img = None
+            mon = int(getattr(self, "_monitor", 1) or 1)
         if img is None:
             # Still publish a11y-only frame so eyes_read is useful without pixels
             a11y = self._a11y_snapshot(pid)
             frame = EyeFrame(
-                ts=time.time(), monitor=1, region=region,
+                ts=time.time(), monitor=mon, region=region,
                 width=0, height=0, phash="0", changed=True,
                 labels=[], a11y_summary=a11y, title=title or "", pid=pid,
             )
@@ -272,7 +285,7 @@ class RealtimeEyes:
                 pass
         frame = EyeFrame(
             ts=time.time(),
-            monitor=1,
+            monitor=mon,
             region=region,
             width=img.size[0],
             height=img.size[1],

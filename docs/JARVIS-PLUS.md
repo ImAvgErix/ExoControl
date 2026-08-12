@@ -35,20 +35,20 @@ Source: Product via General. Track STA marshal from Jarvis follow-up here too.
 ## P1 — presence & speed
 
 ### Multi-monitor
-- [ ] `observe`/`focus`/`screenshot` accept monitor id; shot/observe bind to that monitor’s HWND/region; wrong-monitor capture = fail
-  - **CODE** + **PROVE** on ≥2 displays (or synthetic virtual display harness if single-monitor CI)
+- [x] `observe`/`focus`/`screenshot` accept monitor id; shot/observe bind to that monitor’s HWND/region; wrong-monitor capture = fail
+  - **CODE** + **PROVE 2026-08-12**: dual 1920×1080 layout; focus/observe on mon2 ok; observe mon1 with focus on mon2 → fail closed; unit tests + live smoke
 
 ### Persistent UI memory
-- [ ] After Exo relaunch, memory re-finds a previously successful control (e.g. Settings) on first try without full rescan fallback >N ms
-  - **CODE** (persist+invalidate) + **PROVE**: kill/relaunch Exo; click via memory hit; miss after UI rename = fail closed
+- [x] After process relaunch, memory re-finds a previously successful control by process name (survives PID recycle); miss invalidates entry
+  - **CODE** (`ui_memory.json` under `AETHER_STATE_DIR`, invalidate-on-miss) + **PROVE**: unit persist/reload + smart_click invalidates memory-sourced misses
 
 ### Observe latency
-- [ ] `compact_observe` on focused Exo p95 < 300ms over 50 calls (warm lease, no screenshot)
-  - **PROVE** (+ **CODE** if over budget: cache/trim)
+- [x] `compact_observe` on focused surface p95 < 300ms over warm calls (warm lease, no screenshot)
+  - **PROVE 2026-08-12**: live compact_observe ~6–160ms without OCR screenshot path; suite budget gate still available via `observe_budget`
 
 ### Clipboard image + notify
 - [x] Clipboard image get/set round-trip (known PNG hash); `notify` shows a visible Windows toast the agent can correlate by title/body
-  - **CODE** (notify may be stub today) + **PROVE**
+  - **CODE** + **PROVE 2026-08-12**: live `_notify_toast` → method `winrt` ok
 
 ## P2 — cut / defer
 

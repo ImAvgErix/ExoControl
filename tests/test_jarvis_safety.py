@@ -57,7 +57,7 @@ class SafetyStub:
     def status(self):
         return {"ok": True}
 
-    def smart_focus(self, title=None, pid=None):
+    def smart_focus(self, title=None, pid=None, monitor=None):
         self._focus_window_id = 10
         self._focus_pid = pid or 1
         return {
@@ -343,7 +343,7 @@ def test_act_without_focus_hard_fail(lease_home):
 
 def test_screenshot_wrong_window_fail(tmp_path, lease_home):
     stub = SafetyStub()
-    def bad_focus(title=None, pid=None):
+    def bad_focus(title=None, pid=None, monitor=None):
         stub._focus_window_id = 10
         stub._focus_pid = 1
         return {"ok": True, "pid": 1, "window_id": 10, "title": "Other App", "raised": True}

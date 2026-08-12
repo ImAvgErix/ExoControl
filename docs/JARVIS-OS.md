@@ -72,12 +72,12 @@ Source: Product via General (Eric). Stamp name: **Jarvis OS**.
 - [x] Crash honesty: target app kill mid-script fails ≤15s, lease recoverable, no zombie MCP session
   - **PROVE**
 
-## P1 — Elite presence (trails OK)
+## P1 — Elite presence
 
-- [ ] Multi-monitor observe/focus/shot bind
-- [ ] Persistent UI memory across relaunch with invalidate-on-miss
-- [ ] Clipboard image round-trip + real notify toast (not stub)
-- [ ] Fuzzy launch → wait_window for top N installed apps via Apps folder / PATH
+- [x] Multi-monitor observe/focus/shot bind (`monitor` on focus/observe/screenshot; wrong-monitor fail closed)
+- [x] Persistent UI memory across relaunch with invalidate-on-miss (`~/.aether/state/ui_memory.json`, process-name keys)
+- [x] Clipboard image round-trip + real notify toast (BurntToast → WinRT → NotifyIcon; env stub ignored)
+- [x] Fuzzy launch → wait_window for installed apps (PATH + alias + Start Menu `.lnk` fuzzy; default `wait_ready` for app names)
 
 ## Hard stops (never for Jarvis OS)
 - Anti-cheat / kernel tampering / credential dumping / silent elevation
