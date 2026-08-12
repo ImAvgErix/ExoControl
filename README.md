@@ -40,14 +40,9 @@ pip install exo-control
 exo-control doctor
 ```
 
-Until the PyPI release is live:
-
-```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0"
-exo-control doctor
-```
-
 Optional browser CDP: `pip install "exo-control[browser]"` then `playwright install chromium`.
+
+Pin: `pip install "exo-control==2.0.0"` or `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0"`.
 
 State lives under `~/.exo/`. Legacy `~/.aether/` is migrated automatically.
 
