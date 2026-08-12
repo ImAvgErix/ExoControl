@@ -1,0 +1,146 @@
+# Any AI · Any harness
+
+Exo Control is a **control plane**, not a Cursor plugin. Give it to Grok, Claude, GPT, Gemini, local models, or a custom agent — same surface.
+
+Three ways in (pick what the host supports):
+
+| Surface | When to use | Entry |
+|---------|-------------|--------|
+| **MCP (stdio)** | Host has MCP tools | `python -m exo_control.slim_mcp_server` |
+| **CLI** | Host can run shell / tools | `exo-control exec` / `script` |
+| **Python** | In-process agent / notebook | `AetherExecEngine().execute([...])` |
+
+All three hit the **same** exec engine, lease, safety gates, and ops.
+
+## Agent rules (copy into any system prompt)
+
+```
+You control a Windows PC via Exo Control.
+- Prefer one batched script over many single clicks.
+- Mutating work: lease_acquire → act → lease_release.
+- Eyes first: windows / observe / read / verify. Screenshots only if structure fails.
+- Call help (or MCP exo_help) before inventing ops.
+- confirm=true for destructive OS ops. Never kill anti-cheat.
+- Compact responses by default; do not dump raw HTML/trees unless verbose.
+```
+
+## MCP tools (all hosts)
+
+| Tool | Alias | Role |
+|------|-------|------|
+| `exo_exec` | `aether_exec` | JSON step script |
+| `exo_screenshot` | `aether_screenshot` | Pixels when needed |
+| `exo_help` | `aether_help` | Op catalog + rules |
+
+`script` accepts: JSON array, JSON string, or `{"steps":[...]}`.
+
+### Generic MCP config (stdio)
+
+```json
+{
+  "mcpServers": {
+    "exo-control": {
+      "command": "python",
+      "args": ["-m", "exo_control.slim_mcp_server"],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\YOU\\.aether\\aether-driver\\src",
+        "AETHER_PREFER_CUA": "0"
+      }
+    }
+  }
+}
+```
+
+Use the Python that has the package installed (`pip install -e .` from the repo, or set `PYTHONPATH` to `src`).
+
+### Cursor
+
+`~/.cursor/mcp.json` or project `.cursor/mcp.json` — same block as above.
+
+### Claude Desktop
+
+`claude_desktop_config.json` → `mcpServers` — same block. Restart Claude Desktop.
+
+### Claude Code / Codex / other CLI agents
+
+Register the MCP server per host docs, or skip MCP and use CLI:
+
+```bash
+exo-control exec --steps "[{\"op\":\"help\"}]"
+exo-control script workflow.json
+```
+
+### Windsurf / Continue / Cline / VS Code MCP
+
+Any host that launches a **stdio MCP** process: same `command` + `args` + `env`.
+
+### No MCP? Pipe JSON
+
+```bash
+echo '[{"op":"lease_status"}]' | exo-control exec
+# or
+exo-control exec -f steps.json
+```
+
+### Python (any framework)
+
+```python
+from exo_control.exec_engine import AetherExecEngine
+
+eng = AetherExecEngine()
+result = eng.execute([
+    {"op": "help", "query": "launch"},
+    {"op": "lease_acquire", "agent_id": "my-bot", "task": "demo", "ttl_sec": 90},
+    {"op": "launch", "app": "notepad"},
+    {"op": "lease_release"},
+])
+print(result["ok"], result["steps"][-1]["result"])
+```
+
+## Self-describe (so you never hardcode the catalog)
+
+```json
+{"op": "help"}
+{"op": "help", "query": "browser", "detail": true}
+{"op": "capabilities"}
+```
+
+Or MCP: `exo_help` with optional `query`.
+
+## Minimal happy path
+
+```json
+[
+  {"op": "lease_acquire", "agent_id": "any-agent", "task": "demo", "ttl_sec": 120},
+  {"op": "launch", "app": "notepad"},
+  {"op": "focus", "title": "Notepad"},
+  {"op": "type", "text": "hello from any harness"},
+  {"op": "notify", "title": "Exo Control", "body": "Done"},
+  {"op": "lease_release"}
+]
+```
+
+## Safety (same for every model)
+
+- One **desktop lease** at a time
+- Destructive / kill / registry write / service control need `confirm=true`
+- Hard deny: anti-cheat, credential dump, silent elevation
+- Details: [SECURITY.md](../SECURITY.md)
+
+## Install once
+
+```bash
+git clone https://github.com/ImAvgErix/ExoControl.git
+cd ExoControl
+pip install -e .
+playwright install chromium
+exo-control ops
+```
+
+Optional live path used by some agents:
+
+```
+%USERPROFILE%\.aether\aether-driver\src
+```
+
+Keep it synced with this repo (or `pip install -e .` into the interpreter the harness uses).

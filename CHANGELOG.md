@@ -1,6 +1,19 @@
 # Changelog
 
+## 1.0.1 — 2026-08-12
+
+**Any AI · any harness** — Control is a control plane, not a single-vendor plugin.
+
+- **Self-describe:** exec ops `help` / `ops` / `capabilities` + MCP `exo_help` / `aether_help`
+- **Dual MCP tools:** `exo_exec` / `exo_screenshot` / `exo_help` with full `aether_*` aliases
+- **MCP accepts** list, JSON string, or `{"steps":[...]}` (host-shape tolerant)
+- **CLI:** `exo-control ops|help|exec|mcp|monitors` — JSON in/out for shell-tool agents
+- **Docs:** `docs/HARNESS.md`, root `AGENTS.md`, `skills/exo-control/SKILL.md`
+- Grok skill updated to harness-agnostic wording
+- Tests: `tests/test_harness_agnostic.py`
+
 ## 1.0.0 — 2026-08-12
+
 
 Jarvis OS **complete** release: Floor + P0 + P1 on disk and unit/live smoke proved.
 

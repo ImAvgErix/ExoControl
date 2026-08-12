@@ -1,48 +1,62 @@
-"""Aether Slim MCP — one script tool and one pixel tool.
+"""Exo Control slim MCP — harness-agnostic eyes/hands for ANY AI.
 
-Inspired by script-first browser harnesses: agents receive two stable schemas
-instead of paying for Aether's full desktop/browser tool catalog every turn.
+Any MCP host (Cursor, Claude Desktop, Claude Code, Codex, Windsurf, Continue,
+Cline, custom stdio clients) talks to the same tools. Brand aliases:
+
+  exo_exec / aether_exec
+  exo_screenshot / aether_screenshot
+  exo_help / aether_help
+
+Run:
+  python -m exo_control.slim_mcp_server
+  python -m aether.slim_mcp_server
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 try:
     from mcp.server.fastmcp import FastMCP
-except ImportError:
-    from mcp.server import MCPServer as FastMCP
+except ImportError:  # pragma: no cover
+    from mcp.server import MCPServer as FastMCP  # type: ignore
 
 from aether.exec_engine import AetherExecEngine
-
+from aether.ops_catalog import list_ops, mcp_instructions
 
 engine = AetherExecEngine()
-mcp = FastMCP(
-    "aether",
-    instructions=(
-        "Use aether_exec for UIA-first Windows and browser workflows. Pass a JSON array "
-        "of steps such as [{\"op\":\"focus\",\"title\":\"Exo Launcher\"},"
-        "{\"op\":\"click\",\"query\":\"Settings\",\"require_change\":true},"
-        "{\"op\":\"verify\",\"expect\":[\"Store backends\"]}]. "
-        "Prefer read/verify over screenshots. Use aether_screenshot only when pixels matter."
-    ),
-)
+mcp = FastMCP("exo-control", instructions=mcp_instructions())
+
+
+def _run_exec(script: Union[str, list, dict], stop_on_failure: bool = True) -> Dict[str, Any]:
+    """Accept JSON string, list of steps, or {\"steps\": [...]} — any host shape."""
+    return engine.execute(script, stop_on_failure=stop_on_failure)
 
 
 @mcp.tool()
-def aether_exec(script: str, stop_on_failure: bool = True) -> Dict[str, Any]:
-    """Run a verified multi-step desktop/browser script in one persistent process.
+def exo_exec(script: Any, stop_on_failure: bool = True) -> Dict[str, Any]:
+    """Run a multi-step desktop/browser/OS script (preferred tool name).
 
-    Supported desktop ops: status, windows, focus, read, observe, click, type,
-    scroll, drag, hotkey, keys, fill, wait, wait_gone, wait_change, verify,
-    clipboard_get, clipboard_set, stats, screenshot/shot, cdp_discover, wait_cdp,
-    launch (env/wait_cdp), open, window_min, window_max, window_restore, window_close.
-
-    Supported browser ops: browser_connect, browser_spaces,
-    browser_create_space, browser_navigate, browser_snapshot, browser_click,
-    browser_type, browser_press, browser_scroll, browser_wait, browser_fill,
-    browser_eval, browser_close_space.
+    ``script``: JSON array of step objects, a JSON string of that array, or
+    ``{\"steps\":[...]}``. First mutating work needs lease_acquire; end with
+    lease_release. Call exo_help for the full op catalog.
     """
-    return engine.execute(script, stop_on_failure=stop_on_failure)
+    return _run_exec(script, stop_on_failure=stop_on_failure)
+
+
+@mcp.tool()
+def aether_exec(script: Any, stop_on_failure: bool = True) -> Dict[str, Any]:
+    """Alias of exo_exec — same engine (compat for older prompts/skills)."""
+    return _run_exec(script, stop_on_failure=stop_on_failure)
+
+
+@mcp.tool()
+def exo_screenshot(
+    title: Optional[str] = None,
+    monitor: int = 1,
+    max_side: int = 1600,
+) -> Dict[str, Any]:
+    """Capture window/monitor pixels as JPEG base64 only when structure is insufficient."""
+    return engine.screenshot(title=title, monitor=monitor, max_side=max_side)
 
 
 @mcp.tool()
@@ -51,8 +65,20 @@ def aether_screenshot(
     monitor: int = 1,
     max_side: int = 1600,
 ) -> Dict[str, Any]:
-    """Capture focused-window pixels as JPEG base64 only when structure is insufficient."""
+    """Alias of exo_screenshot."""
     return engine.screenshot(title=title, monitor=monitor, max_side=max_side)
+
+
+@mcp.tool()
+def exo_help(query: Optional[str] = None, detail: bool = False) -> Dict[str, Any]:
+    """Op catalog + harness rules for any AI (no lease). Filter with query."""
+    return list_ops(query=query, detail=detail)
+
+
+@mcp.tool()
+def aether_help(query: Optional[str] = None, detail: bool = False) -> Dict[str, Any]:
+    """Alias of exo_help."""
+    return list_ops(query=query, detail=detail)
 
 
 if __name__ == "__main__":

@@ -1701,7 +1701,7 @@ class SmartController:
         cua_ok = isinstance(self.backend, CuaBackend)
         eyes_running = bool(self._eyes and getattr(self._eyes, "_running", False))
         return {
-            "version": "1.0.0",
+            "version": "1.0.1",
             "backend": self.backend_name,
             "backend_class": type(self.backend).__name__,
             "cua_active": cua_ok,

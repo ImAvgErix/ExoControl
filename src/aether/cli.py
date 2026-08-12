@@ -1,11 +1,13 @@
-"""Drive Aether from a shell without the MCP transport.
+"""Drive Exo Control from a shell — any harness that can run a process.
 
-    python -m aether.cli windows
-    python -m aether.cli cdp
-    python -m aether.cli lease status
-    python -m aether.cli lease acquire --agent grok --task "focus exo"
-    python -m aether.cli lease release --token TOKEN
-    python -m aether.cli script steps.json
+    exo-control windows
+    exo-control ops
+    exo-control help [query]
+    exo-control exec --steps '[{"op":"help"}]'
+    exo-control exec < steps.json
+    exo-control script steps.json
+    exo-control mcp
+    exo-control lease status
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from aether.exec_engine import AetherExecEngine
+from aether.ops_catalog import list_ops
 from aether.smart import SmartController
 
 
@@ -29,15 +32,26 @@ def run_steps(ctrl: SmartController, steps: List[Dict[str, Any]]) -> Dict[str, A
 def main(argv: Optional[List[str]] = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    ap = argparse.ArgumentParser(prog="aether.cli")
+    ap = argparse.ArgumentParser(
+        prog="exo-control",
+        description="Exo Control CLI — eyes/hands for any AI harness (JSON in/out).",
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("windows")
-    sub.add_parser("stats")
-    sub.add_parser("cdp")
+    sub.add_parser("windows", help="List top-level windows")
+    sub.add_parser("stats", help="Driver stats")
+    sub.add_parser("cdp", help="Discover CDP endpoints")
+    sub.add_parser("monitors", help="List physical monitors")
+    p_ops = sub.add_parser("ops", help="Op catalog for any AI")
+    p_ops.add_argument("query", nargs="?", default=None)
+    p_ops.add_argument("--detail", action="store_true")
+    p_help = sub.add_parser("help", help="Same as ops (agent-friendly)")
+    p_help.add_argument("query", nargs="?", default=None)
+    p_help.add_argument("--detail", action="store_true")
 
     p = sub.add_parser("focus")
     p.add_argument("title")
+    p.add_argument("--monitor", type=int, default=None)
 
     p = sub.add_parser("read")
     p.add_argument("title", nargs="?")
@@ -55,12 +69,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--gone", nargs="*", default=[])
     p.add_argument("--timeout", type=float, default=6.0)
 
-    p = sub.add_parser("script")
+    p = sub.add_parser("script", help="Run a JSON steps file")
     p.add_argument("path")
+
+    p = sub.add_parser("exec", help="Run JSON steps from --steps or stdin")
+    p.add_argument("--steps", default=None, help="JSON array string")
+    p.add_argument("--file", "-f", default=None, help="JSON file path")
+    p.add_argument("--continue-on-fail", action="store_true")
 
     p = sub.add_parser("shot")
     p.add_argument("title")
     p.add_argument("out")
+    p.add_argument("--monitor", type=int, default=1)
+
+    p = sub.add_parser("mcp", help="Run the MCP stdio server (any MCP host)")
+    p.add_argument("--module", default="exo_control.slim_mcp_server",
+                   help="Python module (default exo_control.slim_mcp_server)")
 
     p = sub.add_parser("lease")
     lease_sub = p.add_subparsers(dest="lease_cmd", required=True)
@@ -74,10 +98,27 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = ap.parse_args(argv)
 
+    if args.cmd == "mcp":
+        import runpy
+        # stdio MCP server
+        sys.argv = [args.module]
+        runpy.run_module(args.module, run_name="__main__")
+        return 0
+
     if args.cmd == "cdp":
         from aether import exo_bridge
         endpoints = exo_bridge.discover_cdp_endpoints()
         _emit({"ok": True, "endpoints": endpoints, "count": len(endpoints)})
+        return 0
+
+    if args.cmd in {"ops", "help"}:
+        _emit(list_ops(query=getattr(args, "query", None), detail=bool(getattr(args, "detail", False))))
+        return 0
+
+    if args.cmd == "monitors":
+        from aether.monitors import list_monitor_dicts
+        mons = list_monitor_dicts()
+        _emit({"ok": True, "monitors": mons, "count": len(mons)})
         return 0
 
     if args.cmd == "lease":
@@ -92,6 +133,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             out = desktop_lease.release(token=args.token)
             _emit(out)
             return 0 if out.get("ok") else 1
+
+    if args.cmd == "exec":
+        raw = args.steps
+        if args.file:
+            with open(args.file, "r", encoding="utf-8") as fh:
+                raw = fh.read()
+        if raw is None:
+            if sys.stdin.isatty():
+                _emit({"ok": False, "error": "pass --steps JSON, --file path, or pipe JSON on stdin"})
+                return 2
+            raw = sys.stdin.read()
+        eng = AetherExecEngine()
+        out = eng.execute(raw, stop_on_failure=not args.continue_on_fail)
+        _emit(out)
+        return 0 if out.get("ok") else 1
 
     ctrl = SmartController(prefer_cua=False, verify=True)
 
@@ -108,15 +164,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if getattr(args, "title", None):
-        focus = ctrl.smart_focus(title=args.title)
+        mon = getattr(args, "monitor", None)
+        focus = ctrl.smart_focus(title=args.title, monitor=mon)
         if not focus.get("ok"):
             _emit(focus)
             return 1
+    else:
+        focus = None
 
     if args.cmd == "shot":
+        eng = AetherExecEngine(controller=ctrl)
+        out = eng.screenshot(title=args.title, monitor=int(getattr(args, "monitor", 1) or 1))
+        if not out.get("ok"):
+            _emit(out)
+            return 1
+        # If path requested via legacy CLI, write via perception when base64 present
+        # Prefer path write from capture
         state = ctrl.window_state(ctrl._focus_window_id)
         rect = state.get("rect") if state.get("known") else None
-        img = ctrl.perception.capture(monitor=1, region=tuple(rect) if rect else None)
+        img = ctrl.perception.capture(
+            monitor=int(getattr(args, "monitor", 1) or 1),
+            region=tuple(rect) if rect else None,
+        )
         if img is None:
             _emit({"ok": False, "error": "capture failed"})
             return 1

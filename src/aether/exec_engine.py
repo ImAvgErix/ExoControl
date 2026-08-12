@@ -54,6 +54,7 @@ LEASE_REQUIRED_OPS = frozenset({
 LEASE_FREE_OPS = frozenset({
     "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
     "monitors", "list_monitors",
+    "help", "ops", "capabilities", "catalog",
     "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
     "wait_cdp", "wait_for_cdp", "eyes", "apps", "files_list", "files_read",
     "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
@@ -646,6 +647,12 @@ class AetherExecEngine:
             from aether.monitors import list_monitor_dicts
             mons = list_monitor_dicts()
             return {"ok": True, "monitors": mons, "count": len(mons)}
+        if op in {"help", "ops", "capabilities", "catalog"}:
+            from aether.ops_catalog import list_ops
+            return list_ops(
+                query=step.get("query") or step.get("q") or step.get("filter"),
+                detail=bool(step.get("detail") or step.get("verbose") or step.get("fields")),
+            )
         if op in {"focus", "smart_focus"}:
             mon = step.get("monitor")
             focused = self._smart_focus(

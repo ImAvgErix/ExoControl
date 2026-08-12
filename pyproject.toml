@@ -1,7 +1,7 @@
 [project]
 name = "exo-control"
-version = "1.0.0"
-description = "Exo Control — realtime PC eyes and hands for any AI agent. Compact. Leased. Honest. Jarvis OS complete."
+version = "1.0.1"
+description = "Exo Control — realtime PC eyes and hands for any AI agent and any harness (MCP + CLI + Python). Compact. Leased. Honest."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

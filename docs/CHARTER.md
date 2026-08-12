@@ -34,12 +34,13 @@ If a build regresses these, it fails Jarvis OS P0 — not shippable as Exo Contr
 
 Exo is a first-class target, not the only one. Control must not require Exo to be useful.
 
-## Install surfaces (documented in README)
+## Install surfaces (documented in README + docs/HARNESS.md)
 | Surface | Path |
 |---------|------|
-| **MCP** | `python -m aether.slim_mcp_server` (Cursor + Claude Desktop JSON in README) |
-| **CLI** | `exo-control` |
+| **MCP** | `python -m exo_control.slim_mcp_server` (any stdio MCP host; tools `exo_*` + `aether_*`) |
+| **CLI** | `exo-control` / `exo-control exec` / `exo-control mcp` |
 | **Python** | `pip install -e .` then `from exo_control.exec_engine import AetherExecEngine` (or `aether.*`) |
+| **Agent context** | `AGENTS.md` + `skills/exo-control/SKILL.md` (drop into any model) |
 | **Repo** | https://github.com/ImAvgErix/ExoControl |
 
 ## Non-goals
