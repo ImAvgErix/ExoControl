@@ -1,7 +1,7 @@
 """
 UI Memory — remember successful targets so repeated goals are faster.
 
-Persists across process relaunch under AETHER_STATE_DIR / ui_memory.json.
+Persists under EXO_STATE_DIR / ``~/.exo/state/ui_memory.json`` (legacy ``.aether`` ok).
 Keys prefer process name (survives PID recycle) over raw pid.
 """
 from __future__ import annotations
@@ -15,15 +15,8 @@ from typing import Any, Dict, List, Optional
 
 
 def _state_dir() -> Path:
-    raw = os.environ.get("AETHER_STATE_DIR") or os.environ.get("AETHER_LOCK_DIR")
-    if raw:
-        p = Path(raw)
-        # if lock dir passed, use sibling state or same
-        if p.name == "locks":
-            p = p.parent / "state"
-        return p
-    home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or ".")
-    return home / ".aether" / "state"
+    from aether.paths import state_dir
+    return state_dir()
 
 
 @dataclass

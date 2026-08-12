@@ -10,29 +10,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 def default_roots() -> List[Path]:
-    roots: List[Path] = []
-    home = Path(os.environ.get("USERPROFILE") or Path.home())
-    roots.append((home / ".aether" / "workspace").resolve())
-    extra = os.environ.get("AETHER_FILE_ROOTS") or ""
-    if extra.strip():
-        for part in extra.split(os.pathsep):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                roots.append(Path(part).expanduser().resolve())
-            except OSError:
-                continue
-    return roots
+    from aether.paths import file_roots
+    return file_roots()
 
 
 def _audit_path() -> Path:
-    state = os.environ.get("AETHER_STATE_DIR")
-    if state:
-        base = Path(state)
-    else:
-        home = Path(os.environ.get("USERPROFILE") or Path.home())
-        base = home / ".aether" / "state"
+    from aether.paths import state_dir
+    base = state_dir()
     base.mkdir(parents=True, exist_ok=True)
     return base / "files_audit.jsonl"
 

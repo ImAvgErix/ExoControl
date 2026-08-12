@@ -54,7 +54,7 @@ def _ensure_sta() -> None:
         if _thread is not None and _thread.is_alive():
             return
         _ready.clear()
-        _thread = threading.Thread(target=_sta_main, name="aether-sta", daemon=True)
+        _thread = threading.Thread(target=_sta_main, name="exo-sta", daemon=True)
         _thread.start()
     _ready.wait(timeout=5.0)
 

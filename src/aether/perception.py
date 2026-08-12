@@ -27,17 +27,33 @@ try:
 except ImportError:
     HAS_PIL = False
 
-try:
-    import easyocr
-    HAS_EASYOCR = True
-except ImportError:
-    HAS_EASYOCR = False
+# Lazy OCR flags — never import easyocr/torch at module load (CLI cold start).
+HAS_EASYOCR: Optional[bool] = None
+HAS_TESSERACT: Optional[bool] = None
 
-try:
-    import pytesseract
-    HAS_TESSERACT = True
-except ImportError:
-    HAS_TESSERACT = False
+
+def _probe_tesseract() -> bool:
+    global HAS_TESSERACT
+    if HAS_TESSERACT is not None:
+        return HAS_TESSERACT
+    try:
+        import pytesseract  # noqa: F401
+        HAS_TESSERACT = True
+    except ImportError:
+        HAS_TESSERACT = False
+    return bool(HAS_TESSERACT)
+
+
+def _probe_easyocr() -> bool:
+    global HAS_EASYOCR
+    if HAS_EASYOCR is not None:
+        return HAS_EASYOCR
+    try:
+        import easyocr  # noqa: F401
+        HAS_EASYOCR = True
+    except ImportError:
+        HAS_EASYOCR = False
+    return bool(HAS_EASYOCR)
 
 
 @dataclass
@@ -64,17 +80,39 @@ class PerceptionEngine:
         self._last_frame: Optional[Image.Image] = None
         self._last_hash: Optional[str] = None
         self._ocr_reader = None
+        self._ocr_init_attempted = False
         self._obs_cache = None
         self._obs_cache_time = 0.0
         self._obs_cache_ttl = 0.35  # seconds — continuous perception reuse
-        if use_ocr and HAS_EASYOCR and ocr_engine in ("auto", "easyocr"):
-            try:
-                self._ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-            except Exception:
-                self._ocr_reader = None
-        self._obs_cache = None
-        self._obs_cache_time = 0.0
-        self._obs_cache_ttl = 0.35  # seconds — continuous perception reuse
+        # Do NOT construct easyocr.Reader here — it pulls torch and can take
+        # seconds + spam deprecation warnings on every CLI/MCP cold start.
+
+    def ocr_available(self) -> bool:
+        """Whether an OCR backend can be used without claiming it is loaded."""
+        if not self.use_ocr:
+            return False
+        eng = (self.ocr_engine or "auto").lower()
+        if eng in ("auto", "easyocr") and _probe_easyocr():
+            return True
+        if eng in ("auto", "tesseract") and _probe_tesseract():
+            return True
+        return False
+
+    def _ensure_ocr_reader(self) -> None:
+        """Lazy-load easyocr only on first OCR request."""
+        if self._ocr_init_attempted or not self.use_ocr:
+            return
+        self._ocr_init_attempted = True
+        eng = (self.ocr_engine or "auto").lower()
+        if eng not in ("auto", "easyocr"):
+            return
+        if not _probe_easyocr():
+            return
+        try:
+            import easyocr
+            self._ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        except Exception:
+            self._ocr_reader = None
 
     def list_monitors(self) -> List[Dict[str, Any]]:
         if not HAS_MSS:
@@ -153,6 +191,7 @@ class PerceptionEngine:
             img = self._preprocess_for_ocr(img)
         except Exception:
             pass
+        self._ensure_ocr_reader()
         if self._ocr_reader is not None:
             try:
                 ocr_out = self._ocr_reader.readtext(np.array(img))
@@ -168,8 +207,9 @@ class PerceptionEngine:
                     })
             except Exception:
                 pass
-        elif HAS_TESSERACT:
+        elif _probe_tesseract():
             try:
+                import pytesseract
                 data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
                 n = len(data["text"])
                 for i in range(n):

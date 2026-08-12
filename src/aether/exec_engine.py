@@ -58,11 +58,13 @@ LEASE_FREE_OPS = frozenset({
     "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
     "wait_cdp", "wait_for_cdp", "eyes", "apps", "files_list", "files_read",
     "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
-    "wait", "wait_until", "wait_gone", "wait_change", "wait_window", "verify", "verify_ui",
+    "wait", "wait_until", "wait_gone", "wait_change", "wait_window", "wait_all", "wait_any",
+    "verify", "verify_ui",
     "notify", "clipboard_image_save",
     "kill_switch", "arm_kill_switch", "disarm_kill_switch",
     "action_log", "log", "recent_actions",
     "observe_budget",
+    "last_error", "error", "last_fail",
     "registry_read",
     "proc_list", "service_list", "service_status",
     "env_get", "env_list", "tasks_list", "startup_list",
@@ -104,8 +106,45 @@ def _failed(value: Any) -> bool:
     return value.get("ok") is False or value.get("success") is False
 
 
-class AetherExecEngine:
-    """Persistent desktop/browser controller behind the slim MCP."""
+def _step_ok(value: Any) -> bool:
+    """Normalize step success for the step envelope (agents parse step.ok)."""
+    if not isinstance(value, Mapping):
+        return True
+    if value.get("ok") is False or value.get("success") is False:
+        return False
+    if value.get("ok") is True or value.get("success") is True:
+        return True
+    if value.get("error") or value.get("blocked"):
+        return False
+    # status/capabilities-style payloads without explicit ok → success
+    return True
+
+
+def _normalize_result(op: str, value: Any) -> Dict[str, Any]:
+    """Every exec step result is a dict with an ``ok`` field."""
+    if isinstance(value, list):
+        if op in {"windows", "list_windows"}:
+            return {"ok": True, "windows": value, "count": len(value)}
+        if op == "apps":
+            return {"ok": True, "apps": value, "count": len(value)}
+        return {"ok": True, "items": value, "count": len(value)}
+    if isinstance(value, Mapping):
+        out = dict(value)
+        if "ok" not in out:
+            if out.get("success") is False or out.get("error") or out.get("blocked"):
+                out["ok"] = False
+            elif out.get("success") is True:
+                out["ok"] = True
+            else:
+                out["ok"] = True
+        return out
+    if value is None:
+        return {"ok": True}
+    return {"ok": True, "value": value}
+
+
+class ExoExecEngine:
+    """Persistent desktop/browser controller (MCP / CLI / Python). Preferred name."""
 
     def __init__(self, controller: Optional[SmartController] = None):
         self.ctrl = controller or SmartController(
@@ -115,6 +154,9 @@ class AetherExecEngine:
         self._script_lease_token: Optional[str] = None
         self._action_log: List[Dict[str, Any]] = []
         self._last_browser_refs: List[Any] = []
+        self._desktop_refs: Dict[str, Dict[str, Any]] = {}
+        self._last_error: Optional[Dict[str, Any]] = None
+        self._script_launched_pids: List[int] = []
 
     def _get_browser(self):
         if self._browser is None:
@@ -128,65 +170,328 @@ class AetherExecEngine:
 
     @staticmethod
     def parse(script: Any) -> List[Dict[str, Any]]:
+        steps, _finally = ExoExecEngine.parse_document(script)
+        return steps
+
+    @staticmethod
+    def parse_document(script: Any) -> tuple:
+        """Return ``(steps, finally_steps)``.
+
+        Accepts a bare step array or
+        ``{"steps":[...], "finally":[...]}`` (``cleanup`` alias).
+        """
+        finally_steps: List[Dict[str, Any]] = []
         if isinstance(script, str):
             try:
                 script = json.loads(script)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Script must be valid JSON: {exc.msg}") from exc
         if isinstance(script, Mapping):
-            script = script.get("steps")
+            raw_finally = script.get("finally") or script.get("cleanup") or []
+            if raw_finally and (
+                not isinstance(raw_finally, Sequence)
+                or isinstance(raw_finally, (str, bytes, bytearray))
+            ):
+                raise ValueError("finally/cleanup must be a step array.")
+            for index, value in enumerate(raw_finally or []):
+                if not isinstance(value, Mapping):
+                    raise ValueError(f"finally step {index} must be an object.")
+                finally_steps.append(dict(value))
+            script = script.get("steps") if "steps" in script else script.get("script")
+            if script is None and not finally_steps:
+                # bare mapping without steps — treat as single-step? no
+                raise ValueError("Script object needs a steps array.")
+            if script is None:
+                script = []
         if not isinstance(script, Sequence) or isinstance(script, (str, bytes, bytearray)):
             raise ValueError("Script must be a JSON array or an object with a steps array.")
-        if len(script) > MAX_STEPS:
-            raise ValueError(f"Script has {len(script)} steps; maximum is {MAX_STEPS}.")
+        if len(script) + len(finally_steps) > MAX_STEPS:
+            raise ValueError(
+                f"Script has {len(script) + len(finally_steps)} steps; maximum is {MAX_STEPS}."
+            )
         steps: List[Dict[str, Any]] = []
         for index, value in enumerate(script):
             if not isinstance(value, Mapping):
                 raise ValueError(f"Step {index} must be an object.")
             steps.append(dict(value))
-        return steps
+        return steps, finally_steps
 
-    def execute(self, script: Any, stop_on_failure: bool = True) -> Dict[str, Any]:
+    def _register_desktop_refs(self, value: Any) -> Any:
+        """Stamp short-lived ``eN`` refs on read/observe elements for this script."""
+        if not isinstance(value, dict):
+            return value
+        elements = value.get("elements")
+        if not isinstance(elements, list) or not elements:
+            # compact_observe uses a11y list
+            a11y = value.get("a11y")
+            if isinstance(a11y, list) and a11y:
+                elements = a11y
+            else:
+                return value
+        pid = value.get("pid") or value.get("focus_pid") or getattr(self.ctrl, "_focus_pid", None)
+        window_id = value.get("window_id") or getattr(self.ctrl, "_focus_window_id", None)
+        self._desktop_refs = {}
+        ref_ids: List[str] = []
+        stamped: List[Dict[str, Any]] = []
+        for i, el in enumerate(elements[:80]):
+            if not isinstance(el, dict):
+                continue
+            ref = f"e{i}"
+            idx = el.get("element_index")
+            if idx is None:
+                idx = el.get("index")
+            if idx is None:
+                idx = i
+            entry = {
+                "ref": ref,
+                "element_index": int(idx) if idx is not None else i,
+                "name": el.get("name") or el.get("label") or "",
+                "role": el.get("role"),
+                "pid": int(pid) if pid is not None else None,
+                "window_id": int(window_id) if window_id is not None else None,
+                "bbox": el.get("bbox"),
+            }
+            self._desktop_refs[ref] = entry
+            el = dict(el)
+            el["ref"] = ref
+            stamped.append(el)
+            ref_ids.append(ref)
+        if value.get("elements") is not None:
+            value = {**value, "elements": stamped, "refs": ref_ids}
+        elif value.get("a11y") is not None:
+            value = {**value, "a11y": stamped, "refs": ref_ids}
+        return value
+
+    def _resolve_ref(self, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        ref = step.get("ref")
+        if ref is None:
+            return None
+        key = str(ref).strip()
+        hit = self._desktop_refs.get(key)
+        if hit is None and key.isdigit():
+            hit = self._desktop_refs.get(f"e{key}")
+        return hit
+
+    def _capture_fail_evidence(self, max_side: int = 900, quality: int = 55) -> Optional[Dict[str, Any]]:
+        """Compact JPEG of focused window/monitor — no lease required (debug path)."""
         try:
-            steps = self.parse(script)
+            state = {}
+            try:
+                state = self.ctrl.window_state(getattr(self.ctrl, "_focus_window_id", None)) or {}
+            except Exception:
+                state = {}
+            rect = None
+            if isinstance(state, dict) and state.get("known") and state.get("rect"):
+                r = state.get("rect")
+                try:
+                    if len(r) == 4 and int(r[2]) - int(r[0]) > 20 and int(r[3]) - int(r[1]) > 20:
+                        rect = tuple(int(x) for x in r)
+                except Exception:
+                    rect = None
+            image = self.ctrl.perception.capture(monitor=1, region=rect)
+            if image is None:
+                # Absolute fallback: full primary monitor
+                image = self.ctrl.perception.capture(monitor=1, region=None)
+            if image is None:
+                return {"error": "capture returned None"}
+            if max(image.size) > max_side:
+                scale = max_side / max(image.size)
+                image = image.resize(
+                    (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+                )
+            stream = io.BytesIO()
+            image.convert("RGB").save(stream, format="JPEG", quality=max(40, min(85, quality)))
+            b64 = base64.b64encode(stream.getvalue()).decode("ascii")
+            # Cap ~180KB base64 for agent contexts
+            if len(b64) > 240_000:
+                stream = io.BytesIO()
+                image = image.resize((max(1, image.width // 2), max(1, image.height // 2)))
+                image.convert("RGB").save(stream, format="JPEG", quality=45)
+                b64 = base64.b64encode(stream.getvalue()).decode("ascii")
+            return {
+                "mime_type": "image/jpeg",
+                "image_base64": b64,
+                "size": list(image.size),
+                "window": state if isinstance(state, dict) else {},
+            }
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
+    def _run_one(
+        self,
+        index: int,
+        step: Dict[str, Any],
+        *,
+        default_stop: bool,
+        screenshot_on_fail: bool,
+        tag: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        op = str(step.get("op") or "").strip().lower().replace("-", "_")
+        step_started = time.perf_counter()
+        try:
+            # Bound UIA waits only. Playwright browser_* must NOT run under
+            # ThreadPoolExecutor — killing the worker leaves sticky asyncio hung.
+            if op.startswith("wait") or op in {
+                "focus", "smart_focus", "verify", "verify_ui",
+                "observe", "compact_observe", "read_ui", "read",
+            }:
+                value = self._run_step_bounded(
+                    op, step, timeout_s=float(step.get("timeout", 14.0))
+                )
+            else:
+                value = self._run_step(op, step)
+        except Exception as exc:
+            value = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        value = _normalize_result(op, value)
+        if op in {"read", "read_ui", "observe", "compact_observe"} and _step_ok(value):
+            value = self._register_desktop_refs(value)
+        if op == "launch" and _step_ok(value) and value.get("pid"):
+            try:
+                self._script_launched_pids.append(int(value["pid"]))
+            except Exception:
+                pass
+        ok = _step_ok(value)
+        if not ok:
+            want_shot = step.get("screenshot_on_fail")
+            if want_shot is None:
+                want_shot = screenshot_on_fail
+            if want_shot:
+                evidence = self._capture_fail_evidence()
+                if evidence is not None:
+                    value = {**value, "fail_screenshot": evidence}
+            self._last_error = {
+                "ok": False,
+                "step": index,
+                "op": op,
+                "error": value.get("error") or value.get("message") or value.get("missing"),
+                "result": {
+                    k: value.get(k)
+                    for k in (
+                        "ok", "error", "message", "missing", "found", "blocked",
+                        "denied", "reason", "title", "path",
+                    )
+                    if k in value
+                },
+                "ts": time.time(),
+            }
+        entry = {
+            "step": index,
+            "op": op,
+            "ok": ok,
+            "elapsed_ms": round((time.perf_counter() - step_started) * 1000),
+            "result": value,
+        }
+        if tag:
+            entry["phase"] = tag
+        return entry
+
+    def execute(
+        self,
+        script: Any,
+        stop_on_failure: bool = True,
+        auto_release_lease: bool = True,
+        screenshot_on_fail: bool = True,
+    ) -> Dict[str, Any]:
+        try:
+            steps, finally_steps = self.parse_document(script)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "steps": []}
 
         results: List[Dict[str, Any]] = []
         started = time.perf_counter()
-        # Keep held lease across execute() calls; clear only on release/force/expired.
+        acquired_this_script = False
+        released_this_script = False
+        self._desktop_refs = {}
+        self._script_launched_pids = []
+        # Keep held lease across execute() calls unless this script acquired and
+        # failed mid-way (auto_release_lease), so agents are not stuck.
         for index, step in enumerate(steps):
-            op = str(step.get("op") or "").strip().lower().replace("-", "_")
-            step_started = time.perf_counter()
-            try:
-                # Hard-cap wait/browser steps so a dead target cannot hang the script.
-                if op.startswith("wait") or op.startswith("browser_") or op in {
-                    "focus", "smart_focus", "verify", "verify_ui", "observe", "compact_observe", "read_ui",
-                }:
-                    value = self._run_step_bounded(op, step, timeout_s=float(step.get("timeout", 14.0)))
-                else:
-                    value = self._run_step(op, step)
-            except Exception as exc:  # keep a multi-step run inspectable
-                value = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-            results.append(
-                {
-                    "step": index,
-                    "op": op,
-                    "elapsed_ms": round((time.perf_counter() - step_started) * 1000),
-                    "result": value,
-                }
+            entry = self._run_one(
+                index, step, default_stop=stop_on_failure, screenshot_on_fail=screenshot_on_fail
             )
+            op = entry["op"]
+            ok = entry["ok"]
+            if op == "lease_acquire" and ok:
+                acquired_this_script = True
+            if op in {"lease_release", "lease_force_release"} and ok:
+                released_this_script = True
+            results.append(entry)
             should_stop = step.get("stop_on_failure", stop_on_failure)
-            if should_stop and _failed(value):
+            if should_stop and not ok:
                 break
 
-        stopped_early = len(results) < len(steps)
+        main_count = len([r for r in results if r.get("phase") != "finally"])
+        stopped_early = main_count < len(steps)
+
+        # finally / cleanup always runs (best-effort, never aborts mid-cleanup for one fail).
+        finally_results: List[Dict[str, Any]] = []
+        for fi, step in enumerate(finally_steps):
+            entry = self._run_one(
+                main_count + fi,
+                step,
+                default_stop=False,
+                screenshot_on_fail=False,
+                tag="finally",
+            )
+            op = entry["op"]
+            if op == "lease_release" and entry["ok"]:
+                released_this_script = True
+            finally_results.append(entry)
+        results.extend(finally_results)
+
+        auto_released = False
+        # Only auto-release on failure/early-stop so multi-execute lease handoff
+        # still works when a script intentionally ends still holding the lease.
+        if (
+            auto_release_lease
+            and stopped_early
+            and acquired_this_script
+            and not released_this_script
+            and self._script_lease_token
+        ):
+            try:
+                rel = desktop_lease.release(token=self._script_lease_token)
+                self._script_lease_token = None
+                auto_released = bool(rel.get("ok") and rel.get("released"))
+                results.append(
+                    {
+                        "step": len(results),
+                        "op": "lease_release",
+                        "ok": auto_released,
+                        "elapsed_ms": 0,
+                        "auto": True,
+                        "result": {**rel, "auto": True},
+                    }
+                )
+            except Exception as exc:
+                results.append(
+                    {
+                        "step": len(results),
+                        "op": "lease_release",
+                        "ok": False,
+                        "elapsed_ms": 0,
+                        "auto": True,
+                        "result": {
+                            "ok": False,
+                            "auto": True,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        },
+                    }
+                )
+
+        main_ok = not any(
+            (not r.get("ok")) and r.get("phase") != "finally" and not r.get("auto")
+            for r in results
+        )
         return {
-            "ok": not any(_failed(item["result"]) for item in results),
+            "ok": main_ok,
             "elapsed_ms": round((time.perf_counter() - started) * 1000),
-            "completed": len(results),
+            "completed": main_count,
             "requested": len(steps),
             "stopped_early": stopped_early,
+            "auto_released_lease": auto_released,
+            "finally_ran": len(finally_results),
+            "last_error": self._last_error,
             "steps": results,
         }
 
@@ -640,9 +945,16 @@ class AetherExecEngine:
             return ctrl.status()
         if op in {"windows", "list_windows"}:
             mon = step.get("monitor")
-            if mon is not None and hasattr(ctrl, "list_windows"):
-                return ctrl.list_windows(monitor=int(mon))
-            return ctrl.list_windows()
+            if hasattr(ctrl, "list_windows"):
+                try:
+                    return ctrl.list_windows(
+                        monitor=int(mon) if mon is not None else None,
+                        as_dict=True,
+                    )
+                except TypeError:
+                    raw = ctrl.list_windows(monitor=int(mon)) if mon is not None else ctrl.list_windows()
+                    return _normalize_result(op, raw)
+            return {"ok": True, "windows": [], "count": 0}
         if op in {"monitors", "list_monitors"}:
             from aether.monitors import list_monitor_dicts
             mons = list_monitor_dicts()
@@ -682,6 +994,25 @@ class AetherExecEngine:
                 kwargs["monitor"] = int(mon)
             return ctrl.compact_observe(**kwargs)
         if op in {"click", "smart_click"}:
+            ref_hit = self._resolve_ref(step)
+            if ref_hit is not None:
+                return _action_result(
+                    ctrl.smart_click(
+                        query=step.get("query") or ref_hit.get("name"),
+                        element_index=ref_hit.get("element_index"),
+                        pid=ref_hit.get("pid"),
+                        window_id=ref_hit.get("window_id"),
+                        label=ref_hit.get("name"),
+                        button=step.get("button", "left"),
+                        require_change=bool(step.get("require_change", False)),
+                    )
+                )
+            if step.get("ref") is not None:
+                return {
+                    "ok": False,
+                    "error": f"unknown ref: {step.get('ref')!r}",
+                    "known_refs": list(self._desktop_refs.keys())[:40],
+                }
             return _action_result(
                 ctrl.smart_click(
                     query=step.get("query"),
@@ -689,12 +1020,29 @@ class AetherExecEngine:
                     y=step.get("y"),
                     button=step.get("button", "left"),
                     require_change=bool(step.get("require_change", False)),
+                    element_index=step.get("element_index"),
+                    pid=step.get("pid"),
+                    window_id=step.get("window_id") or step.get("hwnd"),
+                    label=step.get("label"),
                 )
             )
         if op in {"type", "smart_type"}:
+            ref_hit = self._resolve_ref(step)
+            query = step.get("query")
+            if ref_hit is not None and not query:
+                # Focus the ref control first when typing into a field ref.
+                if ref_hit.get("name"):
+                    query = ref_hit.get("name")
+                elif ref_hit.get("element_index") is not None:
+                    ctrl.smart_click(
+                        element_index=ref_hit.get("element_index"),
+                        pid=ref_hit.get("pid"),
+                        window_id=ref_hit.get("window_id"),
+                        label=ref_hit.get("name"),
+                    )
             _kwargs = dict(
                 text=str(step.get("text", "")),
-                query=step.get("query"),
+                query=query,
                 clear=bool(step.get("clear", False)),
             )
             try:
@@ -729,6 +1077,10 @@ class AetherExecEngine:
                 clear=bool(step.get("clear", True)),
             )
         if op in {"wait", "wait_until"}:
+            # Composed waits: wait with all=/any= arrays of condition objects.
+            if step.get("all") or step.get("any"):
+                mode = "all" if step.get("all") else "any"
+                return self._wait_compose(step, mode=mode)
             if "seconds" in step:
                 seconds = min(MAX_WAIT_SECONDS, max(0.0, float(step["seconds"])))
                 time.sleep(seconds)
@@ -736,11 +1088,19 @@ class AetherExecEngine:
             return _action_result(
                 ctrl.wait_until(
                     query=step.get("query"),
-                    text_contains=step.get("text_contains"),
+                    text_contains=step.get("text_contains") or step.get("text") or step.get("expect"),
                     timeout=min(MAX_WAIT_SECONDS, float(step.get("timeout", 15.0))),
                     poll=float(step.get("poll", 0.2)),
                 )
             )
+        if op == "wait_all":
+            return self._wait_compose(step, mode="all")
+        if op == "wait_any":
+            return self._wait_compose(step, mode="any")
+        if op in {"last_error", "error", "last_fail"}:
+            if self._last_error is None:
+                return {"ok": True, "error": None, "message": "no prior failure in this engine"}
+            return {"ok": True, **self._last_error, "has_error": True}
         if op == "wait_gone":
             return _action_result(
                 ctrl.wait_gone(
@@ -1054,7 +1414,11 @@ class AetherExecEngine:
             if op == "window_restore":
                 return ctrl.window_restore(hwnd_i)
             if op == "window_close":
-                return ctrl.window_close(hwnd_i)
+                return ctrl.window_close(
+                    hwnd_i,
+                    discard_unsaved=bool(step.get("discard_unsaved", step.get("discard", True))),
+                    wait_gone=float(step.get("wait_gone", step.get("timeout", 2.5))),
+                )
             action = str(step.get("action") or step.get("state") or "state").lower()
             if action in {"minimize", "min"}:
                 return ctrl.window_min(hwnd_i)
@@ -1146,9 +1510,13 @@ class AetherExecEngine:
                 if not bool(step.get("confirm")):
                     return {"ok": False, "error": "proc kill requires confirm=true"}
                 pid = step.get("pid")
-                if pid is None:
-                    return {"ok": False, "error": "proc kill requires pid"}
-                out = _kill_proc(int(pid))
+                name = step.get("name") or step.get("process") or step.get("exe")
+                if pid is None and not name:
+                    return {"ok": False, "error": "proc kill requires pid or name"}
+                out = _kill_proc(
+                    int(pid) if pid is not None else None,
+                    name=str(name) if name else None,
+                )
                 if isinstance(out, dict):
                     out = {**out, "action": "kill"}
                 return out
@@ -1209,9 +1577,14 @@ class AetherExecEngine:
             if not bool(step.get("confirm")):
                 return {"ok": False, "error": "proc kill requires confirm=true"}
             pid = step.get("pid")
-            if pid is None:
-                return {"ok": False, "error": "proc kill requires pid"}
-            return infra_ops.kill_proc(int(pid), confirm=True)
+            name = step.get("name") or step.get("process") or step.get("exe")
+            if pid is None and not name:
+                return {"ok": False, "error": "proc kill requires pid or name"}
+            return infra_ops.kill_proc(
+                int(pid) if pid is not None else None,
+                name=str(name) if name else None,
+                confirm=True,
+            )
         if op == "service_list":
             return infra_ops.service_list(max_items=int(step.get("max", 80)))
         if op == "service_status":
@@ -1253,7 +1626,7 @@ class AetherExecEngine:
             return _desktop_op(step)
 
         if op == "notify":
-            title = str(step.get("title") or "Aether")
+            title = str(step.get("title") or "Exo Control")
             body = str(step.get("body") or step.get("message") or step.get("text") or "")
             # LIVE default is a real toast. Stub ONLY when the step explicitly sets stub:true.
             # AETHER_NOTIFY_STUB is ignored here so a leftover process env cannot fake "done".
@@ -1353,6 +1726,82 @@ class AetherExecEngine:
                     "waited": round(time.perf_counter() - started, 3),
                 }
             time.sleep(min(poll, max(0.0, timeout - (time.perf_counter() - started))))
+
+    def _wait_one_condition(self, cond: Dict[str, Any], timeout: float, poll: float) -> Dict[str, Any]:
+        """Evaluate a single wait condition dict."""
+        ctrl = self.ctrl
+        if "seconds" in cond:
+            time.sleep(min(MAX_WAIT_SECONDS, max(0.0, float(cond["seconds"]))))
+            return {"ok": True, "slept": float(cond["seconds"])}
+        if cond.get("gone") or cond.get("expect_gone") or cond.get("query_gone"):
+            q = cond.get("gone") or cond.get("expect_gone") or cond.get("query_gone") or cond.get("query")
+            return _action_result(
+                ctrl.wait_gone(query=str(q or ""), timeout=timeout)
+            )
+        if cond.get("window") or cond.get("title") and cond.get("wait_window"):
+            return _wait_window(ctrl, {
+                "title": cond.get("window") or cond.get("title"),
+                "pid": cond.get("pid"),
+                "timeout": timeout,
+            })
+        if cond.get("title") and not cond.get("text") and not cond.get("query") and not cond.get("expect"):
+            return _wait_window(ctrl, {"title": cond.get("title"), "pid": cond.get("pid"), "timeout": timeout})
+        expect = cond.get("expect") or cond.get("text") or cond.get("text_contains")
+        if expect and not cond.get("query"):
+            return ctrl.verify_ui(
+                expect=expect if isinstance(expect, list) else [expect],
+                timeout=timeout,
+            )
+        return _action_result(
+            ctrl.wait_until(
+                query=cond.get("query"),
+                text_contains=cond.get("text_contains") or cond.get("text") or cond.get("expect"),
+                timeout=timeout,
+                poll=poll,
+            )
+        )
+
+    def _wait_compose(self, step: Dict[str, Any], mode: str = "all") -> Dict[str, Any]:
+        """Wait until all or any of a list of conditions succeed."""
+        raw = step.get(mode) or step.get("conditions") or step.get("waits") or []
+        if isinstance(raw, Mapping):
+            raw = [raw]
+        if not isinstance(raw, list) or not raw:
+            return {"ok": False, "error": f"wait_{mode} requires a non-empty conditions array"}
+        timeout = min(MAX_WAIT_SECONDS, float(step.get("timeout", 15.0)))
+        poll = float(step.get("poll", 0.25))
+        deadline = time.time() + timeout
+        results: List[Dict[str, Any]] = []
+        while time.time() < deadline:
+            results = []
+            any_ok = False
+            all_ok = True
+            remaining = max(0.05, deadline - time.time())
+            per = remaining if mode == "any" else max(0.15, remaining / max(1, len(raw)))
+            for cond in raw:
+                if not isinstance(cond, Mapping):
+                    results.append({"ok": False, "error": "condition must be object"})
+                    all_ok = False
+                    continue
+                r = self._wait_one_condition(dict(cond), timeout=min(per, 2.0), poll=poll)
+                r = _normalize_result("wait", r)
+                results.append(r)
+                if _step_ok(r):
+                    any_ok = True
+                else:
+                    all_ok = False
+            if mode == "all" and all_ok:
+                return {"ok": True, "mode": "all", "results": results, "count": len(results)}
+            if mode == "any" and any_ok:
+                return {"ok": True, "mode": "any", "results": results, "count": len(results)}
+            time.sleep(poll)
+        return {
+            "ok": False,
+            "mode": mode,
+            "error": f"wait_{mode} timed out",
+            "results": results,
+            "count": len(results),
+        }
 
     def screenshot(
         self,
@@ -1500,9 +1949,13 @@ def _list_procs(max_items: int = 120) -> Dict[str, Any]:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
-def _kill_proc(pid: int) -> Dict[str, Any]:
+def _kill_proc(pid: Optional[int] = None, name: Optional[str] = None) -> Dict[str, Any]:
     """Kill helper used by proc action=kill; hard-denies protected anti-cheat names."""
-    return infra_ops.kill_proc(int(pid), confirm=True)
+    return infra_ops.kill_proc(
+        int(pid) if pid is not None else None,
+        name=name,
+        confirm=True,
+    )
 
 
 def _files_list(path: str, max_items: int = 200, confirm: bool = True) -> Dict[str, Any]:
@@ -1683,3 +2136,7 @@ def _desktop_op(step: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": f"unknown desktop action: {action}"}
     except Exception as exc:
         return {"ok": False, "error": "unsupported", "detail": str(exc)}
+
+# Compat alias (v1.x): prefer ExoExecEngine
+AetherExecEngine = ExoExecEngine
+

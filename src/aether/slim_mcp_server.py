@@ -20,10 +20,10 @@ try:
 except ImportError:  # pragma: no cover
     from mcp.server import MCPServer as FastMCP  # type: ignore
 
-from aether.exec_engine import AetherExecEngine
+from aether.exec_engine import ExoExecEngine
 from aether.ops_catalog import list_ops, mcp_instructions
 
-engine = AetherExecEngine()
+engine = ExoExecEngine()
 mcp = FastMCP("exo-control", instructions=mcp_instructions())
 
 

@@ -1,8 +1,7 @@
-"""Exo Control public package (v0.1 rename window).
+"""Exo Control — preferred public package.
 
-``aether.*`` remains the stable import path for existing harnesses.
-``exo_control`` is the preferred new name and re-exports the same surface,
-including common submodules (``exo_control.exec_engine``, etc.).
+User-facing import: ``import exo_control`` / ``from exo_control import ExoExecEngine``.
+Technical compat: ``aether.*`` remains for 1.x (see docs/API-STABILITY.md).
 """
 from __future__ import annotations
 
@@ -15,12 +14,13 @@ from aether import __version__ as __version__
 from aether import *  # noqa: F403
 
 # Preferred explicit surface for new code
-from aether.exec_engine import AetherExecEngine  # noqa: E402
+from aether.exec_engine import ExoExecEngine, AetherExecEngine  # noqa: E402
 from aether.compact import (  # noqa: E402
     MAX_COMPACT_CHARS,
     MAX_COMPACT_REFS,
     compact_payload,
 )
+from aether.config import ExoConfig, AetherConfig  # noqa: E402
 
 _SUBMODULES = (
     "exec_engine",
@@ -34,6 +34,7 @@ _SUBMODULES = (
     "desktop_lease",
     "clipboard",
     "config",
+    "paths",
 )
 
 
@@ -52,7 +53,10 @@ _alias_submodules()
 
 __all__ = sorted(
     {
+        "ExoExecEngine",
         "AetherExecEngine",
+        "ExoConfig",
+        "AetherConfig",
         "MAX_COMPACT_CHARS",
         "MAX_COMPACT_REFS",
         "compact_payload",

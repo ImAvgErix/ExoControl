@@ -16,7 +16,7 @@ import json
 import sys
 from typing import Any, Dict, List, Optional
 
-from aether.exec_engine import AetherExecEngine
+from aether.exec_engine import ExoExecEngine
 from aether.ops_catalog import list_ops
 from aether.smart import SmartController
 
@@ -26,7 +26,7 @@ def _emit(obj: Any) -> None:
 
 
 def run_steps(ctrl: SmartController, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return AetherExecEngine(controller=ctrl).execute(steps)
+    return ExoExecEngine(controller=ctrl).execute(steps)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -86,6 +86,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--module", default="exo_control.slim_mcp_server",
                    help="Python module (default exo_control.slim_mcp_server)")
 
+    sub.add_parser("doctor", help="Diagnose install path / dual package shadowing")
+
     p = sub.add_parser("lease")
     lease_sub = p.add_subparsers(dest="lease_cmd", required=True)
     lease_sub.add_parser("status")
@@ -104,6 +106,43 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.argv = [args.module]
         runpy.run_module(args.module, run_name="__main__")
         return 0
+
+    if args.cmd == "doctor":
+        import aether
+        import exo_control
+        from pathlib import Path
+        from aether.paths import exo_root, state_dir, lock_dir, workspace_dir
+        aether_path = Path(getattr(aether, "__file__", "") or "")
+        exo_path = Path(getattr(exo_control, "__file__", "") or "")
+        warnings: List[str] = []
+        path_entries = [Path(p) for p in sys.path if p]
+        aether_srcs = [str(p) for p in path_entries if "aether-driver" in str(p) or "ExoControl" in str(p)]
+        if any("aether-driver" in p for p in aether_srcs) and any("ExoControl" in p for p in aether_srcs):
+            if "aether-driver" in str(aether_path):
+                warnings.append(
+                    "import resolves to ~/.aether/aether-driver — remove leftover "
+                    "__editable__.aether_driver-*.pth or drop PYTHONPATH so pip install wins"
+                )
+        site = Path(sys.prefix) / "Lib" / "site-packages"
+        stale = list(site.glob("__editable__.aether_driver-*.pth")) if site.exists() else []
+        for pth in stale:
+            warnings.append(f"stale editable pth: {pth}")
+        _emit({
+            "ok": len(warnings) == 0,
+            "version": getattr(aether, "__version__", "?"),
+            "engine": "ExoExecEngine",
+            "aether": str(aether_path),
+            "exo_control": str(exo_path),
+            "exo_root": str(exo_root()),
+            "state_dir": str(state_dir()),
+            "lock_dir": str(lock_dir()),
+            "workspace": str(workspace_dir()),
+            "same_tree": aether_path.parent.parent == exo_path.parent.parent if aether_path and exo_path else False,
+            "sys_path_hits": aether_srcs[:8],
+            "warnings": warnings,
+            "hint": "pip install \"git+https://github.com/ImAvgErix/ExoControl.git\"  (or pip install -e .)",
+        })
+        return 0 if not warnings else 1
 
     if args.cmd == "cdp":
         from aether import exo_bridge
@@ -144,7 +183,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 _emit({"ok": False, "error": "pass --steps JSON, --file path, or pipe JSON on stdin"})
                 return 2
             raw = sys.stdin.read()
-        eng = AetherExecEngine()
+        eng = ExoExecEngine()
         out = eng.execute(raw, stop_on_failure=not args.continue_on_fail)
         _emit(out)
         return 0 if out.get("ok") else 1
@@ -173,7 +212,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         focus = None
 
     if args.cmd == "shot":
-        eng = AetherExecEngine(controller=ctrl)
+        eng = ExoExecEngine(controller=ctrl)
         out = eng.screenshot(title=args.title, monitor=int(getattr(args, "monitor", 1) or 1))
         if not out.get("ok"):
             _emit(out)

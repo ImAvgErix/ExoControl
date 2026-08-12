@@ -17,7 +17,7 @@ def test_call_on_sta_runs_on_dedicated_thread():
         return on_sta_thread()
 
     assert call_on_sta(_job) is True
-    assert names == ["aether-sta"]
+    assert names == ["exo-sta"]
 
 
 def test_nested_submit_inside_cursor_job_no_deadlock():

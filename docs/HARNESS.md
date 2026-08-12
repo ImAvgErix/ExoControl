@@ -8,7 +8,7 @@ Three ways in (pick what the host supports):
 |---------|-------------|--------|
 | **MCP (stdio)** | Host has MCP tools | `python -m exo_control.slim_mcp_server` |
 | **CLI** | Host can run shell / tools | `exo-control exec` / `script` |
-| **Python** | In-process agent / notebook | `AetherExecEngine().execute([...])` |
+| **Python** | In-process agent / notebook | `ExoExecEngine().execute([...])` |
 
 All three hit the **same** exec engine, lease, safety gates, and ops.
 
@@ -43,7 +43,6 @@ You control a Windows PC via Exo Control.
       "command": "python",
       "args": ["-m", "exo_control.slim_mcp_server"],
       "env": {
-        "PYTHONPATH": "C:\\Users\\YOU\\.aether\\aether-driver\\src",
         "AETHER_PREFER_CUA": "0"
       }
     }
@@ -51,7 +50,7 @@ You control a Windows PC via Exo Control.
 }
 ```
 
-Use the Python that has the package installed (`pip install -e .` from the repo, or set `PYTHONPATH` to `src`).
+Use the Python that has the package installed (`pip install -e .` from the repo). Prefer **not** setting `PYTHONPATH` to a second checkout — dual trees shadow each other. Run `exo-control doctor` if imports look wrong.
 
 ### Cursor
 
@@ -85,9 +84,9 @@ exo-control exec -f steps.json
 ### Python (any framework)
 
 ```python
-from exo_control.exec_engine import AetherExecEngine
+from exo_control import ExoExecEngine
 
-eng = AetherExecEngine()
+eng = ExoExecEngine()
 result = eng.execute([
     {"op": "help", "query": "launch"},
     {"op": "lease_acquire", "agent_id": "my-bot", "task": "demo", "ttl_sec": 90},

@@ -11,10 +11,11 @@ Hardened PC control plane. Not tied to Cursor, Grok, Claude, or Codex — those 
 
 1. **MCP**: `exo_exec` / `exo_screenshot` / `exo_help` (aliases `aether_*`)
 2. **CLI**: `exo-control exec` or `exo-control script steps.json`
-3. **Python**: `from exo_control.exec_engine import AetherExecEngine`
+3. **Python**: `from exo_control import ExoExecEngine`
 
 Server: `python -m exo_control.slim_mcp_server`  
-Env: `PYTHONPATH` must include the package `src` (or `pip install -e .`). `AETHER_PREFER_CUA=0` recommended.
+Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git"` (or `pip install -e .`).  
+Env: `AETHER_PREFER_CUA=0` / `EXO_PREFER_CUA=0` recommended. State under `~/.exo/`.
 
 ## Rules
 

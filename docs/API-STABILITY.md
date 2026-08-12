@@ -1,23 +1,44 @@
-# API stability (v1.0)
+# API stability (v1.1)
 
-## Stable for v1.0
+## Stable for v1.x
 
-- Python: `import aether` and `aether.*` submodules (compat)
-- Python: `import exo_control` and `exo_control.*` (preferred; re-exports `aether`)
-- CLI: `exo-control` and `aether` entry points (both call the same CLI)
-- MCP tool ops: existing op names remain; additive fields only
+- Python: `import exo_control` / `from exo_control import ExoExecEngine` (**preferred**)
+- Python: `import aether` and `aether.*` (**compat** through 1.x)
+- Python: `AetherExecEngine` is an alias of `ExoExecEngine`
+- CLI: `exo-control` (preferred); `aether` entry point still works
+- MCP tools: `exo_*` preferred; `aether_*` aliases remain
+- MCP op names: existing ops remain; additive fields only
 
-### Additive in 1.0 (non-breaking)
+## State directories
 
-- `monitor` on `focus` / `smart_focus` / `observe` / `compact_observe` / `screenshot` / `list_windows`
-- Launch: Start Menu fuzzy resolve; default `wait_ready` for `app`/`name`/`query` (set `wait_ready:false` to skip)
-- Persistent UI memory path + process-name keys (behavior upgrade; no op rename)
+| Path | Role |
+|------|------|
+| `~/.exo/` | **Preferred** product root |
+| `~/.exo/state` | lease focus, UI memory, audits |
+| `~/.exo/locks` | desktop lease lock |
+| `~/.exo/workspace` | default file allowroot |
+| `~/.aether/` | **Legacy** — still read / soft-migrated |
 
-## Rename window
+Env (preferred → legacy):
 
-- Preferred new import: `import exo_control` / `from exo_control.exec_engine import AetherExecEngine`
-- Package name on GitHub: `exo-control` / ExoControl
-- Internal module folder remains `src/aether/` until a future major physical rename
-- Submodule aliases are registered for common modules (`exec_engine`, `browser`, `compact`, `files_ops`, `registry_ops`, `infra_ops`, …)
+- `EXO_HOME` / `AETHER_HOME`
+- `EXO_STATE_DIR` / `AETHER_STATE_DIR`
+- `EXO_LOCK_DIR` / `AETHER_LOCK_DIR`
+- `EXO_FILE_ROOTS` / `AETHER_FILE_ROOTS`
+- `EXO_PREFER_CUA` / `AETHER_PREFER_CUA` (prefer_cua)
 
+## Result envelope
+
+Every `ExoExecEngine.execute` step result is a **dict** with `ok: bool`.  
+`windows` always returns `{ok, windows, count}` (never a bare list).
+
+## Document text
+
+`read` / `observe` expose document body via UIA Value/Text patterns and Win32
+edit `WM_GETTEXT` when needed. Clipboard select-all/copy is **last resort** and
+flagged as `via: "clipboard"`.
+
+## Physical package layout
+
+Internal module folder remains `src/aether/` until a future major.  
 Do not break `aether.*` imports in 1.x patches.

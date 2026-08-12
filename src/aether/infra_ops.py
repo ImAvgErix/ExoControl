@@ -73,35 +73,121 @@ def is_protected_process(name: str) -> bool:
     return any(s in low for s in PROTECTED_PROCESS_SUBSTR)
 
 
-def kill_proc(pid: int, *, confirm: bool = False) -> Dict[str, Any]:
-    if pid <= 0:
-        return {"ok": False, "error": "invalid pid"}
+def find_pids_by_name(name: str, max_hits: int = 20) -> List[Dict[str, Any]]:
+    """Resolve running process rows whose name contains ``name`` (case-insensitive)."""
+    needle = (name or "").strip().lower()
+    if not needle:
+        return []
+    listed = proc_list(max_items=500)
+    hits: List[Dict[str, Any]] = []
+    for row in listed.get("procs") or []:
+        pname = str(row.get("name") or "")
+        if needle in pname.lower():
+            hits.append({"pid": int(row.get("pid") or 0), "name": pname})
+            if len(hits) >= max_hits:
+                break
+    return hits
+
+
+def kill_proc(
+    pid: Optional[int] = None,
+    *,
+    name: Optional[str] = None,
+    confirm: bool = False,
+) -> Dict[str, Any]:
+    """Kill by pid and/or process name.
+
+    Name-only path hard-denies protected anti-cheat substrings without requiring
+    a pid (agents must not need a handle on something they cannot kill).
+    """
     if not confirm:
         return {"ok": False, "error": "proc kill requires confirm=true"}
-    name = _proc_name_for_pid(pid)
-    if name and is_protected_process(name):
+
+    name_s = (name or "").strip()
+    if name_s and is_protected_process(name_s):
         return {
             "ok": False,
             "error": "protected_process",
             "reason": "protected_process",
-            "pid": pid,
-            "name": name,
+            "name": name_s,
+            "denied": True,
         }
-    try:
-        if os.name == "nt":
-            completed = _run(["taskkill", "/PID", str(pid), "/T", "/F"], timeout=10)
-            ok = completed.returncode == 0
+
+    targets: List[Dict[str, Any]] = []
+    if pid is not None:
+        try:
+            pid_i = int(pid)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "invalid pid"}
+        if pid_i <= 0:
+            return {"ok": False, "error": "invalid pid"}
+        pname = _proc_name_for_pid(pid_i)
+        if pname and is_protected_process(pname):
             return {
-                "ok": ok,
-                "pid": pid,
-                "name": name,
-                "stdout": (completed.stdout or "").strip()[:500],
-                "stderr": (completed.stderr or "").strip()[:500],
+                "ok": False,
+                "error": "protected_process",
+                "reason": "protected_process",
+                "pid": pid_i,
+                "name": pname,
+                "denied": True,
             }
-        os.kill(pid, 9)
-        return {"ok": True, "pid": pid, "name": name}
-    except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "pid": pid}
+        targets.append({"pid": pid_i, "name": pname})
+    elif name_s:
+        targets = find_pids_by_name(name_s)
+        if not targets:
+            return {"ok": False, "error": "no matching process", "name": name_s}
+        # Re-check resolved names (list may lag; still deny if any protected).
+        for t in targets:
+            if is_protected_process(str(t.get("name") or "")):
+                return {
+                    "ok": False,
+                    "error": "protected_process",
+                    "reason": "protected_process",
+                    "pid": t.get("pid"),
+                    "name": t.get("name"),
+                    "denied": True,
+                }
+    else:
+        return {"ok": False, "error": "proc kill requires pid or name"}
+
+    results: List[Dict[str, Any]] = []
+    all_ok = True
+    for t in targets:
+        tpid = int(t["pid"])
+        tname = str(t.get("name") or "")
+        try:
+            if os.name == "nt":
+                completed = _run(["taskkill", "/PID", str(tpid), "/T", "/F"], timeout=10)
+                ok = completed.returncode == 0
+                results.append({
+                    "ok": ok,
+                    "pid": tpid,
+                    "name": tname,
+                    "stdout": (completed.stdout or "").strip()[:300],
+                    "stderr": (completed.stderr or "").strip()[:300],
+                })
+                all_ok = all_ok and ok
+            else:
+                os.kill(tpid, 9)
+                results.append({"ok": True, "pid": tpid, "name": tname})
+        except Exception as exc:
+            all_ok = False
+            results.append({
+                "ok": False,
+                "pid": tpid,
+                "name": tname,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+
+    if len(results) == 1:
+        return results[0]
+    return {
+        "ok": all_ok,
+        "killed": [r for r in results if r.get("ok")],
+        "failed": [r for r in results if not r.get("ok")],
+        "count": len(results),
+        "name": name_s or None,
+    }
 
 
 def service_list(max_items: int = 80) -> Dict[str, Any]:

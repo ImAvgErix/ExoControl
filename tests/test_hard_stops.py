@@ -113,6 +113,12 @@ def test_dor_protected_kill_denied_even_with_confirm(monkeypatch):
     assert out.get("reason") == "protected_process" or out.get("error") == "protected_process"
 
 
+def test_dor_protected_kill_by_name_no_pid():
+    out = infra_ops.kill_proc(name="vgc.exe", confirm=True)
+    assert out["ok"] is False
+    assert out.get("reason") == "protected_process" or out.get("error") == "protected_process"
+
+
 def test_dor_protected_kill_via_exec(lease_home, monkeypatch):
     monkeypatch.setattr("aether.infra_ops._proc_name_for_pid", lambda pid: "BattlEye.exe")
     eng = AetherExecEngine()

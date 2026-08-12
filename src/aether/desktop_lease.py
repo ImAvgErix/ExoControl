@@ -1,11 +1,9 @@
 """Exclusive multi-agent desktop lease (Windows-safe file lock).
 
-Lock file:  <home>/.aether/locks/desktop.lock
-Lease JSON: <home>/.aether/state/desktop_lease.json
+Lock file:  <home>/.exo/locks/desktop.lock
+Lease JSON: <home>/.exo/state/desktop_lease.json
 
-Home resolution order:
-  AETHER_LOCK_DIR / AETHER_STATE_DIR (explicit overrides), else
-  AETHER_HOME / USERPROFILE / Path.home() then .aether/{locks,state}
+Home resolution: see ``aether.paths`` (``.exo`` preferred, ``.aether`` legacy).
 """
 from __future__ import annotations
 
@@ -18,23 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
-
-def _aether_home() -> Path:
-    for key in ("AETHER_HOME", "USERPROFILE", "HOME"):
-        raw = (os.environ.get(key) or "").strip()
-        if raw:
-            return Path(raw)
-    return Path.home()
-
-
-def _lock_dir() -> Path:
-    raw = (os.environ.get("AETHER_LOCK_DIR") or "").strip()
-    return Path(raw) if raw else _aether_home() / ".aether" / "locks"
-
-
-def _state_dir() -> Path:
-    raw = (os.environ.get("AETHER_STATE_DIR") or "").strip()
-    return Path(raw) if raw else _aether_home() / ".aether" / "state"
+from aether.paths import lock_dir as _lock_dir
+from aether.paths import state_dir as _state_dir
 
 
 def _lock_path() -> Path:

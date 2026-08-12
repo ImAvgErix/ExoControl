@@ -1,39 +1,40 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Tick docs/ACCEPTANCE.md rows that can be automated; print manual prove steps.
-.PARAMETER SkipLaunch
-  Do not start Exo Launcher / any UI (default: $true).
+  Acceptance gates for Exo Control (unit + optional live CDP).
+.PARAMETER RequireCdp
+  Fail if no CDP endpoint is available.
+.PARAMETER SkipLive
+  Skip live CDP accept script.
 #>
 param(
-  [switch]$SkipLaunch = $true
+  [switch]$RequireCdp,
+  [switch]$SkipLive
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
-$env:PYTHONPATH = "src"
-Write-Host "=== Exo Control acceptance prove (code gates) ==="
+Write-Host "=== Exo Control acceptance ==="
 Write-Host "Repo: $root"
-Write-Host "SkipLaunch=$SkipLaunch"
 
-& py -3.12 -m pytest tests/test_exo_safety.py tests/test_exo_ops.py tests/test_desktop_lease.py -q --tb=line
+Write-Host "`n[1/3] pytest (safety + ops + lease + honesty)..."
+python -m pytest tests/test_exo_safety.py tests/test_exo_ops.py tests/test_desktop_lease.py tests/test_honesty_and_ops.py tests/test_window_close_discard.py tests/test_result_envelope.py -q --tb=line
 if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 
-Write-Host ""
-Write-Host "Automated ticks (when pytest green):"
-Write-Host "  [x] verify / wait_change fail-closed (tests)"
-Write-Host "  [x] Kill switch arms -> exec blocked, zero injects (tests)"
-Write-Host "  [x] Destructive patterns require confirm=true (tests)"
-Write-Host "  [x] Multi-agent desktop lease / shared lock (tests)"
-Write-Host "  [x] screenshot wrong-window fail (tests)"
-Write-Host "  [x] act-without-focus hard fail (tests)"
-Write-Host "  [x] launch CDP child env assign (tests)"
-Write-Host ""
-Write-Host "Manual / live prove:"
-Write-Host "  [ ] Launch helper with CDP (SkipLaunch=$SkipLaunch - not run here)"
-Write-Host "  [ ] cdp_discover returns live endpoint + page target"
-Write-Host "  [ ] browser_snapshot Exo Launcher UI text via CDP"
-Write-Host "  [ ] observe/read named controls without screenshot"
-Write-Host "  [ ] Cold start: slim MCP status -> observe+click+verify x3"
-Write-Host ""
-Write-Host "See docs/ACCEPTANCE.md for full checklist."
+Write-Host "`n[2/3] doctor..."
+exo-control doctor
+if ($LASTEXITCODE -ne 0) { throw "doctor failed" }
+
+if (-not $SkipLive) {
+  Write-Host "`n[3/4] ambient CDP accept (skip-ok if no debugger)..."
+  if ($RequireCdp) { $env:EXO_ACCEPT_REQUIRE_CDP = "1" }
+  python "$root\scripts\accept_cdp_live.py"
+  if ($LASTEXITCODE -ne 0) { throw "accept_cdp_live failed" }
+  Write-Host "`n[4/4] Chromium CDP accept (launches browser)..."
+  python "$root\scripts\accept_cdp_chromium.py"
+  if ($LASTEXITCODE -ne 0) { throw "accept_cdp_chromium failed" }
+} else {
+  Write-Host "`n[3/3] live CDP skipped (-SkipLive)"
+}
+
+Write-Host "`nAcceptance green. See docs/ACCEPTANCE.md for full checklist."

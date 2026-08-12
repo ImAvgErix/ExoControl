@@ -69,9 +69,15 @@ class ExoStub(SmartController):
         self.window_calls.append(("restore", hwnd))
         return {"ok": True, "action": "restore", "window_id": hwnd or self._focus_window_id}
 
-    def window_close(self, hwnd=None):
+    def window_close(self, hwnd=None, discard_unsaved=True, wait_gone=2.5):
         self.window_calls.append(("close", hwnd))
-        return {"ok": True, "action": "close", "window_id": hwnd or self._focus_window_id}
+        return {
+            "ok": True,
+            "action": "close",
+            "window_id": hwnd or self._focus_window_id,
+            "gone": True,
+            "discard": {"ok": True, "dismissed": False, "reason": "stub"},
+        }
 
     def smart_hotkey(self, keys):
         class R:
@@ -286,7 +292,7 @@ def test_proc_kill_requires_confirm(lease_home, monkeypatch):
 
     monkeypatch.setattr(
         "aether.exec_engine._kill_proc",
-        lambda pid: {"ok": True, "pid": pid},
+        lambda pid=None, name=None: {"ok": True, "pid": pid, "name": name},
     )
     ok = eng.execute(
         [

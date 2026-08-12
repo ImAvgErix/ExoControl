@@ -19,8 +19,32 @@ import ctypes
 import hashlib
 import threading
 import time
+import warnings
 from ctypes import wintypes
 from typing import Any, Dict, List, Optional, Tuple
+
+_STA_WARN_ONCE = False
+
+
+def _import_pywinauto_quiet():
+    """Import pywinauto without spamming STA COM warnings to agent stderr."""
+    global _STA_WARN_ONCE
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        import pywinauto  # noqa: F401
+        from pywinauto import Desktop  # noqa: F401
+        from pywinauto.uia_defines import IUIA  # noqa: F401
+        if caught and not _STA_WARN_ONCE:
+            _STA_WARN_ONCE = True
+            # One-line debug breadcrumb only (agents should not see floods).
+            try:
+                import logging
+                logging.getLogger("exo_control.uia").debug(
+                    "pywinauto STA mode: %s", caught[0].message
+                )
+            except Exception:
+                pass
+    return True
 
 # Higher wins when two elements describe the same pixels. A Button beats the
 # Text label drawn inside it, which is what makes clicks land on the control.
@@ -53,6 +77,11 @@ INTERACTIVE_ROLES = frozenset({
     "treeitem", "checkbox", "radiobutton", "combobox", "edit", "slider", "spinner",
 })
 
+# Roles whose typed/document content agents need to read (Value/Text patterns).
+CONTENT_ROLES = frozenset({
+    "edit", "document", "text", "combobox", "spinner", "custom",
+})
+
 
 def _role_rank(role: str) -> int:
     return ROLE_PRIORITY.get((role or "").lower(), 35)
@@ -67,11 +96,11 @@ class CachedElement:
     """
 
     __slots__ = ("index", "name", "role", "bbox", "on_screen", "enabled",
-                 "automation_id", "raw", "_live")
+                 "automation_id", "value", "value_via", "raw", "_live")
 
     def __init__(self, index: int, name: str, role: str, bbox: Optional[List[int]],
                  on_screen: bool = True, enabled: bool = True, automation_id: str = "",
-                 raw: Any = None, live: Any = None):
+                 value: str = "", value_via: str = "", raw: Any = None, live: Any = None):
         self.index = index
         self.name = name
         self.role = role
@@ -79,6 +108,8 @@ class CachedElement:
         self.on_screen = on_screen
         self.enabled = enabled
         self.automation_id = automation_id
+        self.value = value or ""
+        self.value_via = value_via or ""
         self.raw = raw
         self._live = live
 
@@ -102,8 +133,13 @@ class CachedElement:
             return None
         return (self.bbox[0] + self.bbox[2]) // 2, (self.bbox[1] + self.bbox[3]) // 2
 
+    @property
+    def text(self) -> str:
+        """Best human-visible string for this node (name or value content)."""
+        return (self.value or self.name or "").strip()
+
     def as_dict(self) -> Dict[str, Any]:
-        return {
+        out = {
             "element_index": self.index,
             "name": self.name,
             "role": self.role,
@@ -111,6 +147,12 @@ class CachedElement:
             "on_screen": self.on_screen,
             "enabled": self.enabled,
         }
+        if self.value:
+            # Cap so compact_observe stays token-safe.
+            out["value"] = self.value if len(self.value) <= 240 else (self.value[:237] + "...")
+            if self.value_via:
+                out["value_via"] = self.value_via
+        return out
 
 
 class CachedTree:
@@ -232,6 +274,7 @@ class _FastUia:
         self._scope_descendants = 4
         self._scope_children = 2
         try:
+            _import_pywinauto_quiet()
             from pywinauto.uia_defines import IUIA
             wrap = IUIA()
             self.iuia = wrap.iuia
@@ -412,6 +455,103 @@ def _wrap_raw(raw):
         return None
 
 
+def read_element_value_meta(raw: Any, max_chars: int = 800) -> Tuple[str, str]:
+    """Return ``(text, via)`` where via is value|text|legacy|win32|""."""
+    if raw is None or max_chars <= 0:
+        return "", ""
+    try:
+        _import_pywinauto_quiet()
+        from pywinauto.uia_defines import IUIA
+        dll = IUIA().UIA_dll
+    except Exception:
+        return "", ""
+
+    # Prefer ValuePattern (edit fields, many documents).
+    try:
+        iface = getattr(dll, "IUIAutomationValuePattern", None)
+        pid = getattr(dll, "UIA_ValuePatternId", None)
+        if iface is not None and pid is not None:
+            pat = raw.GetCurrentPatternAs(pid, iface._iid_)
+            if pat is not None:
+                v = (getattr(pat, "CurrentValue", None) or "").strip()
+                if v:
+                    return v[:max_chars], "value"
+    except Exception:
+        pass
+
+    # TextPattern — Win11 Notepad document, rich edits.
+    try:
+        iface = getattr(dll, "IUIAutomationTextPattern", None)
+        pid = getattr(dll, "UIA_TextPatternId", None)
+        if iface is not None and pid is not None:
+            pat = raw.GetCurrentPatternAs(pid, iface._iid_)
+            if pat is not None:
+                try:
+                    rng = pat.DocumentRange
+                    if rng is not None:
+                        v = (rng.GetText(int(max_chars)) or "").strip()
+                        if v:
+                            return v[:max_chars], "text"
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Legacy IAccessible value fallback.
+    try:
+        iface = getattr(dll, "IUIAutomationLegacyIAccessiblePattern", None)
+        pid = getattr(dll, "UIA_LegacyIAccessiblePatternId", None)
+        if iface is not None and pid is not None:
+            pat = raw.GetCurrentPatternAs(pid, iface._iid_)
+            if pat is not None:
+                v = (getattr(pat, "CurrentValue", None) or "").strip()
+                if v:
+                    return v[:max_chars], "legacy"
+    except Exception:
+        pass
+    return "", ""
+
+
+def read_element_value(raw: Any, max_chars: int = 800) -> str:
+    """Read document/edit content via Value, Text, or LegacyIAccessible patterns."""
+    text, _via = read_element_value_meta(raw, max_chars=max_chars)
+    return text
+
+
+def win32_child_edit_texts(hwnd: int, max_chars: int = 4000) -> List[str]:
+    """WM_GETTEXT on Edit/RichEdit child HWNDs (classic Notepad + many editors)."""
+    if _user32 is None or not hwnd:
+        return []
+    WM_GETTEXT = 0x000D
+    WM_GETTEXTLENGTH = 0x000E
+    out: List[str] = []
+
+    def _cb(child, _lp):
+        try:
+            cls = _window_class(int(child))
+            cl = (cls or "").lower()
+            if not any(k in cl for k in ("edit", "richedit", "text")):
+                return True
+            n = int(_user32.SendMessageW(int(child), WM_GETTEXTLENGTH, 0, 0))
+            if n <= 0:
+                return True
+            n = min(n, max_chars)
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _user32.SendMessageW(int(child), WM_GETTEXT, n + 1, buf)
+            text = (buf.value or "").strip()
+            if text:
+                out.append(text[:max_chars])
+        except Exception:
+            pass
+        return True
+
+    try:
+        _user32.EnumChildWindows(int(hwnd), _WNDENUMPROC(_cb), 0)
+    except Exception:
+        return out
+    return out
+
+
 def invoke_raw(raw) -> Optional[str]:
     """Invoke through UIA patterns directly. Returns the pattern used, or None."""
     if raw is None:
@@ -474,6 +614,7 @@ class UiaTreeCache:
         if self._desktop is not None:
             return True
         try:
+            _import_pywinauto_quiet()
             from pywinauto import Desktop
             self._desktop = Desktop(backend="uia")
             return True
@@ -593,6 +734,23 @@ class UiaTreeCache:
             elements, by_name = self._build_legacy(pid, window_id)
             truncated = False
 
+        # Second pass: Win32 edit text when UIA Value/Text is empty (classic Notepad).
+        if hwnd and not any(getattr(e, "value", None) for e in elements):
+            for blob in win32_child_edit_texts(int(hwnd), max_chars=4000):
+                if not blob:
+                    continue
+                el = CachedElement(
+                    index=len(elements),
+                    name="",
+                    role="edit",
+                    bbox=None,
+                    value=blob,
+                    value_via="win32",
+                    raw=None,
+                )
+                elements.append(el)
+                by_name.setdefault(blob.lower()[:120], []).append(el.index)
+
         self.stats["builds"] += 1
         tree = CachedTree(
             pid=int(pid),
@@ -622,23 +780,31 @@ class UiaTreeCache:
                 continue
             name, role, bbox, on_screen, enabled, aid = read
             role_l = (role or "").lower()
-            if not name and role_l not in INTERACTIVE_ROLES:
+            value = ""
+            value_via = ""
+            # Pull Value/Text for content roles + any interactive edit-like control.
+            if role_l in CONTENT_ROLES or role_l in INTERACTIVE_ROLES or not name:
+                value, value_via = read_element_value_meta(raw)
+            if not name and not value and role_l not in INTERACTIVE_ROLES and role_l not in CONTENT_ROLES:
                 continue
             if bbox:
                 # Guard against windows parked off the virtual desktop.
                 cx, cy = (bbox[0] + bbox[2]) // 2, (bbox[1] + bbox[3]) // 2
                 if cx < vl or cx > vr or cy < vt or cy > vb:
                     on_screen = False
-            key = (name.lower(), tuple(bbox) if bbox else None)
+            key = (name.lower(), tuple(bbox) if bbox else None, (value[:40].lower() if value else ""))
             existing = buckets.get(key)
             candidate = CachedElement(
                 index=-1, name=name, role=str(role), bbox=bbox,
-                on_screen=on_screen, enabled=enabled, automation_id=aid, raw=raw,
+                on_screen=on_screen, enabled=enabled, automation_id=aid,
+                value=value, value_via=value_via, raw=raw,
             )
             if existing is None:
                 buckets[key] = candidate
                 order.append(key)
             elif candidate.rank > existing.rank:
+                buckets[key] = candidate
+            elif candidate.rank == existing.rank and candidate.value and not existing.value:
                 buckets[key] = candidate
 
         elements: List[CachedElement] = []
@@ -649,6 +815,8 @@ class UiaTreeCache:
             elements.append(el)
             if el.name:
                 by_name.setdefault(el.name.lower(), []).append(el.index)
+            if el.value and el.value.lower() != (el.name or "").lower():
+                by_name.setdefault(el.value.lower()[:120], []).append(el.index)
         return elements, by_name
 
     def _build_legacy(self, pid: int, window_id: Optional[int]):
@@ -686,7 +854,19 @@ class UiaTreeCache:
                 role = el.element_info.control_type or ""
             except Exception:
                 pass
-            if not name and str(role).lower() not in INTERACTIVE_ROLES:
+            value = ""
+            role_l = str(role).lower()
+            if role_l in CONTENT_ROLES:
+                try:
+                    value = (el.get_value() or "").strip() if hasattr(el, "get_value") else ""
+                except Exception:
+                    value = ""
+                if not value:
+                    try:
+                        value = (el.iface_value.CurrentValue or "").strip()
+                    except Exception:
+                        value = ""
+            if not name and not value and role_l not in INTERACTIVE_ROLES:
                 continue
             bbox = None
             try:
@@ -701,10 +881,28 @@ class UiaTreeCache:
             seen.add(key)
             idx = len(elements)
             elements.append(CachedElement(index=idx, name=name, role=str(role),
-                                          bbox=bbox, live=el))
+                                          bbox=bbox, value=value, live=el))
             if name:
                 by_name.setdefault(name.lower(), []).append(idx)
+            if value:
+                by_name.setdefault(value.lower()[:120], []).append(idx)
         return elements, by_name
+
+    def text_corpus(self, pid: int, window_id: Optional[int] = None,
+                    force: bool = False, max_chars: int = 4000) -> str:
+        """Concatenated name+value text for verify/type honesty checks."""
+        tree = self.get_tree(pid, window_id, force=force)
+        chunks: List[str] = []
+        total = 0
+        for el in tree.elements:
+            for part in (el.name, el.value):
+                if not part:
+                    continue
+                chunks.append(part)
+                total += len(part)
+                if total >= max_chars:
+                    return "\n".join(chunks)[:max_chars]
+        return "\n".join(chunks)
 
     def get_element(self, pid: int, element_index: int, window_id: Optional[int] = None):
         tree = self.get_tree(pid, window_id)
@@ -744,26 +942,32 @@ class UiaTreeCache:
     def _rank(tree: CachedTree, q: str) -> List[CachedElement]:
         scored: List[Tuple[float, int, CachedElement]] = []
         for el in tree.elements:
-            if not el.name:
+            best = 0.0
+            for field in (el.name, el.value):
+                if not field:
+                    continue
+                nl = field.lower()
+                if nl == q:
+                    score = 1.0
+                elif nl.startswith(q) or nl.endswith(q):
+                    score = 0.86
+                elif q in nl:
+                    score = 0.78
+                elif nl in q:
+                    score = 0.7
+                else:
+                    continue
+                # Shorter names that match are more specific.
+                score -= min(0.12, abs(len(nl) - len(q)) * 0.004)
+                if score > best:
+                    best = score
+            if best <= 0:
                 continue
-            nl = el.name.lower()
-            if nl == q:
-                name_score = 1.0
-            elif nl.startswith(q) or nl.endswith(q):
-                name_score = 0.86
-            elif q in nl:
-                name_score = 0.78
-            elif nl in q:
-                name_score = 0.7
-            else:
-                continue
-            # Shorter names that match are more specific.
-            name_score -= min(0.12, abs(len(nl) - len(q)) * 0.004)
             if not el.on_screen:
-                name_score -= 0.5
+                best -= 0.5
             if not el.enabled:
-                name_score -= 0.15
-            scored.append((name_score, el.rank, el))
+                best -= 0.15
+            scored.append((best, el.rank, el))
 
         scored.sort(key=lambda s: (round(s[0], 3), s[1]), reverse=True)
         return [s[2] for s in scored]
@@ -778,7 +982,8 @@ def _hash_elements(elements: List[CachedElement]) -> str:
     """Stable fingerprint of the visible UI, for change verification."""
     h = hashlib.sha1()
     for e in elements:
-        h.update(f"{e.name}|{e.role}|{e.bbox}|{e.enabled}\n".encode("utf-8", "ignore"))
+        val = (e.value or "")[:120]
+        h.update(f"{e.name}|{val}|{e.role}|{e.bbox}|{e.enabled}\n".encode("utf-8", "ignore"))
     return h.hexdigest()[:16]
 
 

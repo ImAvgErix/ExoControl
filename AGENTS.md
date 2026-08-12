@@ -7,7 +7,7 @@ You have **eyes and hands on a Windows PC** via Exo Control. You are not limited
 1. **MCP tools** (preferred if available): `exo_exec`, `exo_screenshot`, `exo_help`  
    (aliases: `aether_exec`, `aether_screenshot`, `aether_help`)
 2. **CLI**: `exo-control exec --steps '...'` or `exo-control script file.json`
-3. **Python**: `AetherExecEngine().execute([...])`
+3. **Python**: `ExoExecEngine().execute([...])` (alias: `AetherExecEngine`)
 
 If you do not know an op, run `{"op":"help"}` or `exo_help` first.
 

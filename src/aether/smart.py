@@ -147,7 +147,7 @@ def _parse_cua_tree(state: Dict[str, Any], pid: int, window_id: Optional[int]) -
 def _env_prefer_cua(default: bool = False) -> bool:
     """Resolve prefer_cua from env / ~/.aether/config.json (Synthetic-first by default)."""
     import os
-    env = (os.environ.get("AETHER_PREFER_CUA") or "").strip().lower()
+    env = (os.environ.get("EXO_PREFER_CUA") or os.environ.get("AETHER_PREFER_CUA") or "").strip().lower()
     if env in ("1", "true", "yes", "on"):
         return True
     if env in ("0", "false", "no", "off"):
@@ -170,7 +170,8 @@ class SmartController:
     ):
         if prefer_cua is None:
             prefer_cua = _env_prefer_cua(False)
-        self.perception = PerceptionEngine(use_ocr=True)
+        # OCR is lazy — never construct easyocr/torch on controller init.
+        self.perception = PerceptionEngine(use_ocr=True, ocr_engine="auto")
         self.perception.set_cache_ttl(cache_ttl)
         self.prefer_cua = prefer_cua
         self.backend: ActionBackend = get_best_backend(prefer_cua=prefer_cua, prefer_synthetic=True)
@@ -254,9 +255,21 @@ class SmartController:
         if interactive_only:
             chosen = [e for e in chosen if (e.role or "").lower() in INTERACTIVE_ROLES]
         labels: List[str] = []
+        values: List[str] = []
+        value_entries: List[Dict[str, Any]] = []
         for e in chosen:
             if e.name and e.name not in labels:
                 labels.append(e.name)
+            val = (getattr(e, "value", None) or "").strip()
+            if val and val not in values:
+                clipped = val if len(val) <= 240 else val[:237] + "..."
+                values.append(clipped)
+                value_entries.append({
+                    "text": clipped,
+                    "via": getattr(e, "value_via", None) or "uia",
+                    "role": e.role,
+                    "element_index": e.index,
+                })
         offscreen = sum(1 for e in tree.elements if not e.on_screen)
         self._record_stat("read_ui", time.time() - t0)
         return {
@@ -267,6 +280,8 @@ class SmartController:
             "age_ms": int((time.time() - tree.built_at) * 1000),
             "ui_hash": tree.ui_hash,
             "labels": labels[:max_elements],
+            "values": values[:max_elements],
+            "value_entries": value_entries[:max_elements],
             "elements": [e.as_dict() for e in chosen[:max_elements]],
             "element_count": len(tree.elements),
             "interactive_count": sum(
@@ -417,8 +432,171 @@ class SmartController:
     def window_restore(self, hwnd: Optional[int] = None) -> Dict[str, Any]:
         return self._window_show("restore", hwnd=hwnd, cmd=9)  # SW_RESTORE
 
-    def window_close(self, hwnd: Optional[int] = None) -> Dict[str, Any]:
-        return self._window_show("close", hwnd=hwnd)
+    def _window_alive(self, hwnd: Optional[int]) -> bool:
+        if hwnd is None:
+            return False
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.IsWindow(int(hwnd)))
+        except Exception:
+            return False
+
+    def _find_discard_button(self) -> Optional[Target]:
+        """Locate Don't save / Discard / No on the focused save prompt."""
+        # Prefer explicit discard phrasing; bare "No" only if a save prompt is up.
+        primary = ("don't save", "dont save", "do not save", "discard")
+        secondary = ("no",)
+        for needle in primary:
+            hit = self._find_visible_label(needle)
+            if hit is not None:
+                return hit
+        # Only accept "No" when UI also mentions save/unsaved.
+        try:
+            corpus = ""
+            if self._focus_pid is not None:
+                corpus = self._uia().text_corpus(
+                    int(self._focus_pid), self._focus_window_id, force=True, max_chars=2000
+                ).lower()
+            title = ""
+            tree = self._uia().get_tree(self._focus_pid, self._focus_window_id, force=False) if self._focus_pid else None
+            if tree is not None:
+                title = (tree.title or "").lower()
+            if any(k in corpus or k in title for k in ("save", "unsaved", "want to save")):
+                for needle in secondary:
+                    hit = self._find_visible_label(needle)
+                    if hit is not None:
+                        return hit
+        except Exception:
+            pass
+        return None
+
+    def _dismiss_unsaved_prompt(self, closed_hwnd: Optional[int], timeout: float = 2.5) -> Dict[str, Any]:
+        """If a Save/Don't-save dialog appears after close, pick Don't save.
+
+        Agents type into Notepad then close — without this, WM_CLOSE leaves a
+        modal that blocks the desktop (and must not press Save).
+        """
+        deadline = time.time() + max(0.4, float(timeout))
+        attempts: List[str] = []
+        while time.time() < deadline:
+            # Original window already gone and no prompt → done.
+            if closed_hwnd is not None and not self._window_alive(closed_hwnd):
+                # Check briefly for a lingering dialog from same app.
+                pass
+
+            # Click Don't save if present on focused tree.
+            hit = self._find_discard_button()
+            if hit is not None:
+                delivery = self._deliver_click(target=hit, button="left")
+                attempts.append(f"click:{hit.label}")
+                if delivery.ok:
+                    time.sleep(0.2)
+                    gone = closed_hwnd is None or not self._window_alive(closed_hwnd)
+                    return {
+                        "ok": True,
+                        "dismissed": True,
+                        "via": "click",
+                        "label": hit.label,
+                        "gone": gone,
+                        "attempts": attempts,
+                    }
+
+            # Scan top-level windows for a Notepad/save dialog and focus it.
+            try:
+                for w in self._uia().list_windows(force=True)[:30]:
+                    title = (w.get("title") or "")
+                    tl = title.lower()
+                    if not w.get("visible"):
+                        continue
+                    if not any(k in tl for k in ("notepad", "save", "unsaved")):
+                        continue
+                    try:
+                        self.smart_focus(title=title, pid=int(w.get("pid") or 0) or None)
+                    except Exception:
+                        continue
+                    hit = self._find_discard_button()
+                    if hit is not None:
+                        delivery = self._deliver_click(target=hit, button="left")
+                        attempts.append(f"focus+click:{hit.label}")
+                        if delivery.ok:
+                            time.sleep(0.2)
+                            gone = closed_hwnd is None or not self._window_alive(closed_hwnd)
+                            return {
+                                "ok": True,
+                                "dismissed": True,
+                                "via": "focus+click",
+                                "label": hit.label,
+                                "dialog": title,
+                                "gone": gone,
+                                "attempts": attempts,
+                            }
+            except Exception as exc:
+                attempts.append(f"scan_err:{exc}")
+
+            # Hotkeys only if a save-ish dialog is focused (avoid typing "n" into apps).
+            try:
+                title = ""
+                if self._focus_pid is not None:
+                    tr = self._uia().get_tree(self._focus_pid, self._focus_window_id, force=False)
+                    title = (tr.title or "").lower()
+                if any(k in title for k in ("notepad", "save", "unsaved")) or self._find_discard_button():
+                    for keys in (["alt", "n"], ["n"]):
+                        self.smart_hotkey(keys)
+                        attempts.append(f"hotkey:{'+'.join(keys)}")
+                        time.sleep(0.2)
+                        if closed_hwnd is not None and not self._window_alive(closed_hwnd):
+                            return {
+                                "ok": True,
+                                "dismissed": True,
+                                "via": "hotkey",
+                                "keys": keys,
+                                "gone": True,
+                                "attempts": attempts,
+                            }
+            except Exception as exc:
+                attempts.append(f"hotkey_err:{exc}")
+
+            time.sleep(0.12)
+
+        gone = closed_hwnd is None or not self._window_alive(closed_hwnd)
+        return {
+            "ok": gone,
+            "dismissed": False,
+            "gone": gone,
+            "attempts": attempts,
+            "error": None if gone else "save prompt not dismissed",
+        }
+
+    def window_close(
+        self,
+        hwnd: Optional[int] = None,
+        discard_unsaved: bool = True,
+        wait_gone: float = 2.5,
+    ) -> Dict[str, Any]:
+        """Close focused/given window; press Don't save on unsaved prompts (default)."""
+        h = self._hwnd_for_window_op(hwnd)
+        out = self._window_show("close", hwnd=hwnd)
+        if not out.get("ok"):
+            return out
+        if not discard_unsaved:
+            out["gone"] = not self._window_alive(h)
+            return out
+        time.sleep(0.2)
+        if h is not None and not self._window_alive(h):
+            out["gone"] = True
+            out["discard"] = {"ok": True, "dismissed": False, "reason": "already_gone", "gone": True}
+            return out
+        discard = self._dismiss_unsaved_prompt(closed_hwnd=h, timeout=wait_gone)
+        out["discard"] = discard
+        out["gone"] = bool(discard.get("gone")) or not self._window_alive(h)
+        if not out["gone"] and not discard.get("dismissed"):
+            out["warning"] = "window may still be open (save dialog?)"
+        # Drop window list cache so a following `windows` op is not stale.
+        try:
+            self._uia().invalidate()
+        except Exception:
+            pass
+        return out
 
     def _get_browser(self):
         if not HAS_BROWSER:
@@ -455,18 +633,32 @@ class SmartController:
             out["monitor"] = int(kwargs["monitor"])
         return out
 
-    def list_windows(self, monitor: Optional[int] = None) -> List[Dict[str, Any]]:
+    def list_windows(
+        self,
+        monitor: Optional[int] = None,
+        *,
+        as_dict: bool = False,
+    ):
+        """List top-level windows.
+
+        Historical callers get a bare list. Prefer ``as_dict=True`` / exec op
+        ``windows`` which always returns ``{ok, windows, count}``.
+        """
         try:
             windows = self._uia().list_windows()
         except Exception:
             windows = self.backend.list_windows()
-        if monitor is None:
-            return windows
-        from .monitors import filter_windows_for_monitor
-        hits, mon = filter_windows_for_monitor(list(windows or []), int(monitor))
-        if mon is None:
-            return []
-        return hits
+        windows = list(windows or [])
+        if monitor is not None:
+            from .monitors import filter_windows_for_monitor
+            hits, mon = filter_windows_for_monitor(windows, int(monitor))
+            windows = hits if mon is not None else []
+        if as_dict:
+            out: Dict[str, Any] = {"ok": True, "windows": windows, "count": len(windows)}
+            if monitor is not None:
+                out["monitor"] = int(monitor)
+            return out
+        return windows
 
     def _focus_process_name(self) -> Optional[str]:
         pid = self._focus_pid
@@ -772,7 +964,11 @@ class SmartController:
 
     def smart_click(self, query: Optional[str] = None, x: Optional[int] = None,
                     y: Optional[int] = None, button: str = "left",
-                    require_change: bool = False) -> ActionOutcome:
+                    require_change: bool = False,
+                    element_index: Optional[int] = None,
+                    pid: Optional[int] = None,
+                    window_id: Optional[int] = None,
+                    label: Optional[str] = None) -> ActionOutcome:
         t0 = time.time()
         if not getattr(self, "_safety_prechecked", False):
             ok_s, why = self.safety.check("click", text=query or "", confirm=False)
@@ -784,7 +980,35 @@ class SmartController:
         targets: List[Target] = []
         pre: Dict[str, Any] = {}
         pre_id = None
-        if query:
+        # Stable script ref → element_index (same exec batch as prior read/observe).
+        if element_index is not None:
+            use_pid = int(pid) if pid is not None else self._focus_pid
+            use_hwnd = int(window_id) if window_id is not None else self._focus_window_id
+            if use_pid is None:
+                return ActionOutcome(False, False, "ref click needs focus pid",
+                                     elapsed=0.0, backend=self.backend_name)
+            t = Target(
+                kind="a11y",
+                label=str(label or query or f"#{element_index}"),
+                confidence=0.99,
+                source="ref",
+                pid=int(use_pid),
+                window_id=use_hwnd,
+                element_index=int(element_index),
+                meta={"role": "?", "via": "ref"},
+            )
+            try:
+                cached = self._uia().get_cached(int(use_pid), int(element_index), use_hwnd)
+                if cached is not None:
+                    t.label = cached.name or t.label
+                    t.bbox = cached.bbox
+                    t.meta["role"] = cached.role
+                    if t.bbox and t.center:
+                        t.x, t.y = t.center
+            except Exception:
+                pass
+            targets = [t]
+        if query and not targets:
             targets = self.find_targets(query, obs=None, allow_ocr=False)
             if not targets or targets[0].confidence < 0.85:
                 pre = self.observe(modes=["ocr", "vision", "diff"], include_image=False, use_cache=True)
@@ -896,6 +1120,65 @@ class SmartController:
                              attempts=min(len(targets), self.max_retries+1),
                              pre_obs_id=pre_id, elapsed=time.time()-t0, backend=self.backend_name)
 
+    def _text_in_focus_meta(self, text: str) -> Dict[str, Any]:
+        """Locate typed content; prefer UIA/Win32, clipboard only as last resort.
+
+        Returns ``{found: bool, via: str}`` where via is one of
+        name|value|text|legacy|win32|clipboard|"".
+        """
+        needle = (text or "").strip()
+        if not needle:
+            return {"found": True, "via": "empty"}
+        sample = needle if len(needle) <= 120 else needle[:120]
+        sample_l = sample.lower()
+        if self._focus_pid is None:
+            return {"found": False, "via": ""}
+        try:
+            tree = self._uia().get_tree(
+                int(self._focus_pid), self._focus_window_id, force=True
+            )
+            for el in tree.elements:
+                name = (el.name or "")
+                val = getattr(el, "value", "") or ""
+                if name and sample_l in name.lower():
+                    return {"found": True, "via": "name"}
+                if val and sample_l in val.lower():
+                    return {"found": True, "via": getattr(el, "value_via", None) or "value"}
+            corpus = self._uia().text_corpus(
+                int(self._focus_pid), self._focus_window_id, force=False, max_chars=6000
+            )
+            if sample_l in (corpus or "").lower():
+                return {"found": True, "via": "uia"}
+        except Exception:
+            pass
+        # Last resort: select-all → copy (mutates selection/clipboard briefly).
+        try:
+            prev_ok, prev = get_clipboard()
+            prev_text = prev if prev_ok else None
+            self.smart_hotkey(["ctrl", "a"])
+            time.sleep(0.05)
+            self.smart_hotkey(["ctrl", "c"])
+            time.sleep(0.08)
+            ok, clip = get_clipboard()
+            found = bool(ok and sample_l in (clip or "").lower())
+            try:
+                self.smart_hotkey(["right"])
+            except Exception:
+                pass
+            if prev_text is not None:
+                try:
+                    set_clipboard(str(prev_text))
+                except Exception:
+                    pass
+            if found:
+                return {"found": True, "via": "clipboard"}
+        except Exception:
+            pass
+        return {"found": False, "via": ""}
+
+    def _text_visible_in_focus(self, text: str) -> bool:
+        return bool(self._text_in_focus_meta(text).get("found"))
+
     def smart_type(self, text: str, query: Optional[str] = None, clear: bool = False,
                    confirm: bool = False) -> ActionOutcome:
         t0 = time.time()
@@ -912,15 +1195,68 @@ class SmartController:
                                      elapsed=time.time()-t0, backend=self.backend_name)
             focus_target = click_out.target
             time.sleep(0.1)
-        pre = self.observe(modes=["diff"], include_image=False, use_cache=False)
         delivery = self._deliver_type(text, clear=clear, target=focus_target)
+        # Invalidate a11y so Value/Text patterns re-read document content.
+        try:
+            self._uia().invalidate(self._focus_pid, self._focus_window_id)
+        except Exception:
+            pass
         time.sleep(0.12)
-        post = self.observe(modes=["diff"], include_image=False, use_cache=False)
-        changed = self._verify_change(pre, post) if self.verify else True
-        return ActionOutcome(delivery.ok, changed, f"Typed {len(text)} chars ({delivery.backend})",
+        content_ok = False
+        via = ""
+        backend_used = delivery.backend
+        if delivery.ok:
+            meta = self._text_in_focus_meta(text)
+            content_ok = bool(meta.get("found"))
+            via = str(meta.get("via") or "")
+            if self.verify and not content_ok:
+                deadline = time.time() + 1.2
+                while time.time() < deadline and not content_ok:
+                    time.sleep(0.12)
+                    try:
+                        self._uia().invalidate(self._focus_pid, self._focus_window_id)
+                    except Exception:
+                        pass
+                    meta = self._text_in_focus_meta(text)
+                    content_ok = bool(meta.get("found"))
+                    via = str(meta.get("via") or "")
+            # Paste fallback for IME / apps that drop synthetic unicode.
+            if self.verify and not content_ok:
+                try:
+                    prev_ok, prev = get_clipboard()
+                    prev_text = prev if prev_ok else None
+                    set_clipboard(str(text))
+                    if clear:
+                        self.smart_hotkey(["ctrl", "a"])
+                        time.sleep(0.04)
+                    self.smart_hotkey(["ctrl", "v"])
+                    time.sleep(0.12)
+                    try:
+                        self._uia().invalidate(self._focus_pid, self._focus_window_id)
+                    except Exception:
+                        pass
+                    meta = self._text_in_focus_meta(text)
+                    content_ok = bool(meta.get("found"))
+                    if content_ok:
+                        via = str(meta.get("via") or "paste")
+                        backend_used = f"{delivery.backend}+paste"
+                    if prev_text is not None:
+                        try:
+                            set_clipboard(str(prev_text))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        # Honesty: never mark verified from pixel-diff alone (title bar * lied).
+        verified = bool(content_ok) if self.verify else bool(delivery.ok)
+        msg = f"Typed {len(text)} chars ({backend_used})"
+        if delivery.ok and self.verify and not content_ok:
+            msg += " — delivery ok but text not visible in a11y (unverified)"
+        elif delivery.ok and content_ok:
+            msg += f" — verified via {via or 'a11y'}"
+        return ActionOutcome(delivery.ok, verified, msg,
                              attempts=1, target=focus_target,
-                             pre_obs_id=pre.get("obs_id"), post_obs_id=post.get("obs_id"),
-                             elapsed=time.time()-t0, backend=delivery.backend)
+                             elapsed=time.time()-t0, backend=backend_used)
 
     def smart_scroll(self, dy: int = 600, dx: int = 0, query: Optional[str] = None) -> ActionOutcome:
         t0 = time.time()
@@ -1170,7 +1506,7 @@ class SmartController:
         return ActionOutcome(False, False, f"Timeout waiting for '{needle}'", elapsed=time.time() - t0, backend=self.backend_name)
 
     def _find_visible_label(self, needle_l: str) -> Optional[Target]:
-        """First on-screen a11y element whose name contains needle."""
+        """First a11y element whose name or value contains needle (document text counts)."""
         if self._focus_pid is None:
             return None
         try:
@@ -1183,14 +1519,24 @@ class SmartController:
         except Exception:
             return None
         for el in tree.elements:
-            if not el.name or needle_l not in el.name.lower():
+            name = el.name or ""
+            value = getattr(el, "value", "") or ""
+            hit_field = None
+            via = "name"
+            if name and needle_l in name.lower():
+                hit_field = name
+            elif value and needle_l in value.lower():
+                hit_field = value if len(value) <= 80 else value[:77] + "..."
+                via = "value"
+            if not hit_field:
                 continue
-            if not el.on_screen:
+            # Document/value hits may have odd offscreen bounds; still accept.
+            if not el.on_screen and via == "name":
                 continue
             t = Target(
-                kind="a11y", label=el.name, bbox=el.bbox, confidence=0.95,
+                kind="a11y", label=hit_field, bbox=el.bbox, confidence=0.95,
                 source="uia-cache", pid=self._focus_pid, window_id=self._focus_window_id,
-                element_index=el.index, meta={"role": el.role, "cached": el},
+                element_index=el.index, meta={"role": el.role, "cached": el, "via": via},
             )
             if t.bbox and t.center:
                 t.x, t.y = t.center
@@ -1231,14 +1577,27 @@ class SmartController:
             still_present = []
             for needle in expect:
                 hit = self._find_visible_label(str(needle).lower())
-                if hit is None:
-                    missing.append(needle)
-                else:
+                if hit is not None:
                     found[needle] = {"label": hit.label,
                                      "role": (hit.meta or {}).get("role"),
-                                     "at": [hit.x, hit.y]}
+                                     "at": [hit.x, hit.y],
+                                     "via": (hit.meta or {}).get("via") or "name"}
+                    continue
+                # Document body: Value/Text/Win32 first; clipboard last.
+                meta = self._text_in_focus_meta(str(needle))
+                if meta.get("found"):
+                    found[needle] = {
+                        "label": str(needle),
+                        "role": "document",
+                        "at": [None, None],
+                        "via": meta.get("via") or "content",
+                    }
+                else:
+                    missing.append(needle)
             for needle in expect_gone:
                 if self._find_visible_label(str(needle).lower()) is not None:
+                    still_present.append(needle)
+                elif self._text_in_focus_meta(str(needle)).get("found"):
                     still_present.append(needle)
             if not missing and not still_present:
                 break
@@ -1543,16 +1902,26 @@ class SmartController:
                 ocr = (obs.get("vision") or {}).get("ocr") or []
                 els = (obs.get("vision") or {}).get("elements") or []
         a11y_els = ui.get("elements") or []
+        a11y_compact = []
+        for e in a11y_els[:max_elements]:
+            item = {
+                "label": e.get("name"),
+                "role": e.get("role"),
+                "bbox": e.get("bbox"),
+                "element_index": e.get("element_index"),
+            }
+            if e.get("value"):
+                item["value"] = e.get("value")
+            a11y_compact.append(item)
         out: Dict[str, Any] = {
+            "ok": True,
             "backend": self.backend_name,
             "focus_pid": self._focus_pid or ui.get("pid"),
             "title": ui.get("title"),
             "a11y_labels": (ui.get("labels") or [])[:max_elements],
-            "a11y": [
-                {"label": e.get("name"), "role": e.get("role"), "bbox": e.get("bbox"),
-                 "element_index": e.get("element_index")}
-                for e in a11y_els[:max_elements]
-            ],
+            "a11y_values": (ui.get("values") or [])[:max_elements],
+            "a11y_value_entries": (ui.get("value_entries") or [])[:max_elements],
+            "a11y": a11y_compact,
             "ocr": [
                 {"text": i.get("text"), "conf": i.get("confidence") or i.get("conf"), "bbox": i.get("bbox")}
                 for i in ocr[:max_ocr]
@@ -1698,10 +2067,18 @@ class SmartController:
 
 
     def status(self) -> Dict[str, Any]:
+        import sys
         cua_ok = isinstance(self.backend, CuaBackend)
         eyes_running = bool(self._eyes and getattr(self._eyes, "_running", False))
+        ocr_ready = False
+        try:
+            ocr_ready = bool(getattr(self.perception, "ocr_available", lambda: False)())
+        except Exception:
+            ocr_ready = False
         return {
-            "version": "1.0.1",
+            "ok": True,
+            "version": "1.2.0",
+            "engine": "ExoExecEngine",
             "backend": self.backend_name,
             "backend_class": type(self.backend).__name__,
             "cua_active": cua_ok,
@@ -1721,12 +2098,13 @@ class SmartController:
             "capabilities": {
                 "a11y_element_clicks": True,
                 "uia_tree_cache": True,
+                "uia_value_text": True,
                 "realtime_eyes": True,
                 "read_ui": True,
                 "exo_cdp_discover": True,
                 "background_hands": True,
                 "local_ui_grounding": True,
-                "ocr_grounding": True,
+                "ocr_grounding": ocr_ready,
                 "frame_diff_verify": True,
                 "auto_retry": True,
                 "ui_memory": True,
@@ -1738,7 +2116,7 @@ class SmartController:
                 "smart_fill": True,
                 "clipboard": True,
                 "kill_switch": True,
-                "pywinauto_windows": True,
+                "pywinauto_windows": sys.platform == "win32",
                 "action_log": True,
                 "observe_annotated": True,
                 "cdp_attach": True,
@@ -1749,10 +2127,10 @@ class SmartController:
                 "macros": True,
                 "synthetic_hands": True,
                 "virtual_cursors": True,
-                "uia_invoke": True,
-                "ax_mac": True,
+                "uia_invoke": sys.platform == "win32",
+                "ax_mac": sys.platform == "darwin",
                 "parallel_cursor_queues": True,
-                "start_menu_launch": True,
+                "start_menu_launch": sys.platform == "win32",
                 "smart_scroll_drag": True,
                 "windows_browser_spaces": HAS_BROWSER,
             },

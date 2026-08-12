@@ -36,7 +36,12 @@ def test_list_results_do_not_break_failure_detection():
     result = engine.execute([{"op": "windows"}, {"op": "status"}])
     assert result["ok"] is True
     assert result["completed"] == 2
-    assert result["steps"][0]["result"] == [{"title": "One"}]
+    # windows is always a dict envelope (never a bare list)
+    body = result["steps"][0]["result"]
+    assert body["ok"] is True
+    assert body["windows"] == [{"title": "One"}]
+    assert body["count"] == 1
+    assert result["steps"][1]["result"].get("ok") is True
 
 
 def test_unknown_operation_stops_by_default_but_can_continue():

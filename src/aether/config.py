@@ -5,11 +5,23 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-DEFAULT_PATH = Path.home() / ".aether" / "config.json"
+
+def _default_config_path() -> Path:
+    from aether.paths import config_path, legacy_aether_root
+    preferred = config_path()
+    if preferred.exists():
+        return preferred
+    legacy = legacy_aether_root() / "config.json"
+    if legacy.exists():
+        return legacy
+    return preferred
+
+
+DEFAULT_PATH = _default_config_path()  # resolved at import; load() re-resolves
 
 
 @dataclass
-class AetherConfig:
+class ExoConfig:
     prefer_cua: bool = False  # Synthetic hands are first-class; Cua not required
     max_retries: int = 3
     verify: bool = True
@@ -22,13 +34,13 @@ class AetherConfig:
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def save(self, path: Optional[Path] = None) -> None:
-        path = path or DEFAULT_PATH
+        path = path or _default_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(asdict(self), indent=2))
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "AetherConfig":
-        path = path or DEFAULT_PATH
+    def load(cls, path: Optional[Path] = None) -> "ExoConfig":
+        path = path or _default_config_path()
         if not path.exists():
             return cls()
         try:
@@ -38,3 +50,7 @@ class AetherConfig:
             return cls(**filtered)
         except Exception:
             return cls()
+
+
+# Compat alias
+AetherConfig = ExoConfig

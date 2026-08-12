@@ -1,5 +1,5 @@
-"""Exo Control v1.0.1 — realtime PC eyes/hands for any AI (MCP + CLI + Python)."""
-__version__ = "1.0.1"
+"""Exo Control v1.2.0 — realtime PC eyes/hands for any AI (MCP + CLI + Python)."""
+__version__ = "1.2.0"
 from .perception import PerceptionEngine
 from .action import ActionEngine
 from .smart import SmartController, Target, ActionOutcome
@@ -8,7 +8,7 @@ from .grounding import LocalGrounder, GroundedElement
 from .memory import UIMemory
 from .monitors import list_monitor_dicts, get_monitor, filter_windows_for_monitor
 from .safety import SafetyGate, SafetyConfig
-from .config import AetherConfig
+from .config import AetherConfig, ExoConfig
 from .macros import MacroStore
 try:
     from .synthetic import SyntheticBackend, CursorManager, VirtualCursor, QueueHub
@@ -27,6 +27,6 @@ __all__ = [
     "CuaBackend", "LocalBackend", "SyntheticBackend", "PywinautoBackend", "get_best_backend",
     "LocalGrounder", "GroundedElement", "UIMemory", "SafetyGate", "SafetyConfig",
     "list_monitor_dicts", "get_monitor", "filter_windows_for_monitor",
-    "AetherConfig", "MacroStore", "CursorManager", "VirtualCursor", "QueueHub",
+    "AetherConfig", "ExoConfig", "MacroStore", "CursorManager", "VirtualCursor", "QueueHub",
     "BrowserEngine", "BrowserEngineSync", "__version__",
 ]

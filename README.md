@@ -34,8 +34,8 @@ This is **not** a desktop app and does **not** ship a Setup.exe. Install with `p
 | How the AI talks | Entry |
 |------------------|--------|
 | **MCP tools** | `exo_exec` · `exo_screenshot` · `exo_help` (compat aliases `aether_*`) |
-| **CLI / shell** | `exo-control exec` · `exo-control script` |
-| **Python** | `AetherExecEngine().execute([...])` |
+| **CLI / shell** | `exo-control exec` · `exo-control script` · `exo-control doctor` |
+| **Python** | `ExoExecEngine().execute([...])` |
 
 Related product: **[Exo Launcher](https://github.com/ImAvgErix/ExoLauncher)** — optional first-class target; Control works without it.
 
@@ -46,15 +46,33 @@ Related product: **[Exo Launcher](https://github.com/ImAvgErix/ExoLauncher)** �
 
 ## Install
 
+**One-liner (recommended):**
+
+```bash
+pip install "git+https://github.com/ImAvgErix/ExoControl.git"
+playwright install chromium
+exo-control doctor
+```
+
+When published to PyPI:
+
+```bash
+pip install exo-control
+```
+
+**Editable clone (development):**
+
 ```bash
 git clone https://github.com/ImAvgErix/ExoControl.git
 cd ExoControl
-pip install -e .
+pip install -e ".[dev]"
 playwright install chromium
 exo-control ops
 ```
 
-Preferred import: `exo_control`. Technical compat: `aether.*` — [docs/API-STABILITY.md](docs/API-STABILITY.md).
+State lives under **`~/.exo/`** (locks, state, workspace). Legacy `~/.aether/` is migrated/read automatically.
+
+Preferred import: `from exo_control import ExoExecEngine`. Technical compat: `aether.*` / `AetherExecEngine` — [docs/API-STABILITY.md](docs/API-STABILITY.md).
 
 ## Give it to any AI
 
@@ -67,13 +85,14 @@ Preferred import: `exo_control`. Technical compat: `aether.*` — [docs/API-STAB
       "command": "python",
       "args": ["-m", "exo_control.slim_mcp_server"],
       "env": {
-        "PYTHONPATH": "%USERPROFILE%\\.aether\\aether-driver\\src",
         "AETHER_PREFER_CUA": "0"
       }
     }
   }
 }
 ```
+
+After `pip install -e .`, **do not** set `PYTHONPATH` to a second tree (e.g. `~\.aether\aether-driver\src`) — leftover editable installs will shadow this package. Diagnose with `exo-control doctor`.
 
 Paste into any stdio MCP host. Host matrix: **[docs/HARNESS.md](docs/HARNESS.md)**.
 
@@ -94,16 +113,48 @@ echo "[{\"op\":\"lease_status\"}]" | exo-control exec
 ### Python
 
 ```python
-from exo_control.exec_engine import AetherExecEngine
+from exo_control import ExoExecEngine
 
-eng = AetherExecEngine()
+eng = ExoExecEngine()
 eng.execute([
     {"op": "lease_acquire", "agent_id": "my-agent", "task": "demo", "ttl_sec": 120},
     {"op": "launch", "app": "notepad"},
     {"op": "type", "text": "hello from Exo Control"},
+    {"op": "window_close", "title": "Notepad"},  # Don't Save by default
     {"op": "lease_release"},
 ])
 ```
+
+### Acceptance
+
+```bash
+# unit + doctor + CDP live (skips cleanly if no debugger)
+pwsh -File scripts/Prove-Acceptance.ps1
+python scripts/accept_cdp_live.py
+# always-on: launches Chromium with remote debugging
+python scripts/accept_cdp_chromium.py
+```
+
+### Agent reliability (1.2)
+
+```json
+{
+  "steps": [
+    {"op": "lease_acquire", "agent_id": "bot", "task": "ui", "ttl_sec": 120},
+    {"op": "launch", "app": "notepad"},
+    {"op": "read"},
+    {"op": "click", "ref": "e0"},
+    {"op": "type", "text": "hello"},
+    {"op": "verify", "text": "hello"}
+  ],
+  "finally": [
+    {"op": "window_close", "title": "Notepad"},
+    {"op": "lease_release"}
+  ]
+}
+```
+
+Failed steps include `fail_screenshot` by default. Inspect with `{"op":"last_error"}`.
 
 Drop **[AGENTS.md](AGENTS.md)** into any model’s system/project rules. Skill: [`skills/exo-control/SKILL.md`](skills/exo-control/SKILL.md).
 
