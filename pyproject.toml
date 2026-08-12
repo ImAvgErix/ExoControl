@@ -1,6 +1,6 @@
 [project]
 name = "exo-control"
-version = "1.2.0"
+version = "2.0.0"
 description = "Exo Control — realtime PC eyes and hands for any AI agent (MCP + CLI + Python). Compact. Leased. Honest."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
@@ -26,14 +27,16 @@ dependencies = [
     "Pillow>=10.0.0",
     "numpy>=1.24.0",
     "mcp>=1.0.0",
-    "playwright>=1.40.0",
     "pywinauto>=0.6.8; platform_system=='Windows'",
 ]
 
 [project.optional-dependencies]
+browser = ["playwright>=1.40.0"]
 ocr = ["pytesseract", "easyocr"]
 agent = ["openai"]
+legacy-input = ["pyautogui>=0.9.54"]
 dev = ["pytest>=7.0", "build", "twine"]
+full = ["playwright>=1.40.0", "pytesseract", "easyocr", "pyautogui>=0.9.54"]
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -43,8 +46,8 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [project.scripts]
-exo-control = "aether.cli:main"
-aether = "aether.cli:main"
+exo-control = "exo_control.cli:main"
+aether = "exo_control.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/ImAvgErix/ExoControl"

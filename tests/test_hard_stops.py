@@ -54,7 +54,7 @@ def test_dor_files_mutating_require_confirm_outside_root(lease_home, monkeypatch
     outside.write_text("nope", encoding="utf-8")
     denied = files_ops.files_write(str(outside), "x", confirm=False, roots=[lease_home / "workspace"])
     assert denied["ok"] is False
-    assert "confirm" in denied["error"]
+    assert "allowroot" in denied["error"] or "EXO_" in denied["error"] or "confirm" in denied["error"]
 
 
 def test_dor_files_recursive_delete_requires_confirm(lease_home):

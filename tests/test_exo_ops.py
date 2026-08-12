@@ -15,6 +15,7 @@ from aether.smart import SmartController
 def lease_home(tmp_path, monkeypatch):
     monkeypatch.setenv("AETHER_LOCK_DIR", str(tmp_path / "locks"))
     monkeypatch.setenv("AETHER_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("AETHER_FILE_ROOTS", str(tmp_path))
     yield tmp_path
 
 
@@ -110,7 +111,9 @@ def test_lease_acquire_conflict_expire_release(lease_home):
 
     st = desktop_lease.status()
     assert st["held"] is True
-    assert st["token"] == token
+    assert st["holder"] == "agent-a"
+    assert "token" not in st
+    assert st.get("has_token") is True
 
     renewed = desktop_lease.renew(token, ttl_sec=1)
     assert renewed["ok"] is True
@@ -248,6 +251,7 @@ def test_launch_op_uses_popen(lease_home, monkeypatch):
                 "args": ["--flag"],
                 "cwd": r"C:\Tools",
                 "env": {"FOO": "bar"},
+                "confirm": True,
             },
             {"op": "lease_release"},
         ]
@@ -286,9 +290,7 @@ def test_proc_kill_requires_confirm(lease_home, monkeypatch):
     assert denied["steps"][1]["result"]["ok"] is False
     assert "confirm" in denied["steps"][1]["result"]["error"]
 
-    st = desktop_lease.status()
-    if st.get("token"):
-        desktop_lease.release(st["token"])
+    desktop_lease.force_release(agent_id="p")
 
     monkeypatch.setattr(
         "aether.exec_engine._kill_proc",
@@ -309,9 +311,13 @@ def test_notify_stubs_subprocess(lease_home, monkeypatch):
     monkeypatch.setenv("AETHER_NOTIFY_STUB", "1")
     eng = AetherExecEngine(controller=ExoStub())
     # Explicit stub still works; env stub only honored under pytest.
-    result = eng.execute([{"op": "notify", "title": "Aether", "message": "hello", "stub": True}])
+    result = eng.execute([
+        {"op": "lease_acquire", "agent_id": "n", "task": "toast", "ttl_sec": 20},
+        {"op": "notify", "title": "Aether", "message": "hello", "stub": True},
+        {"op": "lease_release"},
+    ])
     assert result["ok"] is True
-    assert result["steps"][0]["result"].get("stub") is True
+    assert result["steps"][1]["result"].get("stub") is True
     # env alone must NOT stub anymore (live prove safety)
 
 

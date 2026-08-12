@@ -1,45 +1,41 @@
 # Publishing Exo Control
 
-## GitHub release (done for v1.2.0)
+## GitHub (wheel / sdist)
 
 ```bash
-git tag -a v1.2.0 -m "Exo Control v1.2.0"
-git push origin v1.2.0
-gh release create v1.2.0 --title "v1.2.0" --notes-file notes.md
-gh release upload v1.2.0 dist/*.whl dist/*.tar.gz
+git tag -a v2.0.0 -m "Exo Control v2.0.0"
+git push origin v2.0.0
+gh release create v2.0.0 --title "v2.0.0" --generate-notes
+python -m build
+gh release upload v2.0.0 dist/exo_control-2.0.0*
 ```
 
-Install from tag:
+Install from tag until PyPI is live:
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v1.2.0"
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0"
 ```
 
-Or from release asset:
+## PyPI trusted publisher
+
+GitHub side is already done:
+
+- Environment: `pypi` (no extra protection rules)
+- Workflow: `.github/workflows/publish.yml` (OIDC `id-token: write`)
+- Owner/repo: `ImAvgErix/ExoControl`
+
+PyPI pending publisher is **registered** (2026-08-12) on account **UhhErix**:
+
+- Project: `exo-control`
+- GitHub: `ImAvgErix/ExoControl`
+- Workflow: `publish.yml`
+- Environment: `pypi`
+
+The first successful `publish.yml` run creates the project and turns this pending publisher into an ordinary one.
 
 ```bash
-pip install https://github.com/ImAvgErix/ExoControl/releases/download/v1.2.0/exo_control-1.2.0-py3-none-any.whl
+# after 2.0 is on origin/main (or a release tag):
+gh workflow run publish.yml -R ImAvgErix/ExoControl
 ```
 
-## PyPI (one-time setup)
-
-Workflow: `.github/workflows/publish.yml` (Trusted Publishing / OIDC).
-
-1. Create project **exo-control** on https://pypi.org (or claim name).
-2. PyPI → Account settings → **Publishing** → **Add a new pending publisher**:
-   - Owner: `ImAvgErix`
-   - Repository: `ExoControl`
-   - Workflow: `publish.yml`
-   - Environment: `pypi`
-3. GitHub repo → Settings → Environments → create **`pypi`** (optional protection rules).
-4. Publish a GitHub Release (or run workflow_dispatch on `publish.yml`).
-
-Until then, use the git/tag or release wheel install above.
-
-## Verify install
-
-```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v1.2.0"
-exo-control doctor
-python -c "from exo_control import ExoExecEngine; print(ExoExecEngine)"
-```
+Do not run publish against an old main (1.2.x) — that would upload the pre-invert tree.

@@ -4,8 +4,7 @@ You have **eyes and hands on a Windows PC** via Exo Control. You are not limited
 
 ## How you call it
 
-1. **MCP tools** (preferred if available): `exo_exec`, `exo_screenshot`, `exo_help`  
-   (aliases: `aether_exec`, `aether_screenshot`, `aether_help`)
+1. **MCP tools** (preferred if available): `exo_exec`, `exo_screenshot`, `exo_help`
 2. **CLI**: `exo-control exec --steps '...'` or `exo-control script file.json`
 3. **Python**: `ExoExecEngine().execute([...])` (alias: `AetherExecEngine`)
 
@@ -26,13 +25,13 @@ If you do not know an op, run `{"op":"help"}` or `exo_help` first.
 |----|--------|
 | UIA / DOM / refs | Coordinate spam |
 | `require_change` when UI should flip | Assume click worked |
-| `confirm=true` for kill/registry write/delete | Silent destructive OS ops |
+| `confirm=true` for kill/registry write/delete | Silent destructive OS ops or `confirm` to escape allowroots |
 | Fail closed and report step errors | Invent window titles or UI text |
 | Compact observe | Dump full trees / raw HTML |
 
 ## Safety hard stops
 
-No anti-cheat kill, no credential dumping, no silent elevation. See SECURITY.md.
+No anti-cheat kill, no unnamed-PID kill, no silent elevation. `lease_status` does not include the token. Files stay in `EXO_FILE_ROOTS`. See SECURITY.md.
 
 ## Exo Launcher (optional target)
 

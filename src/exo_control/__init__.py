@@ -1,66 +1,100 @@
-"""Exo Control — preferred public package.
-
-User-facing import: ``import exo_control`` / ``from exo_control import ExoExecEngine``.
-Technical compat: ``aether.*`` remains for 1.x (see docs/API-STABILITY.md).
-"""
+"""Exo Control — realtime PC eyes/hands for any AI (MCP + CLI + Python)."""
 from __future__ import annotations
 
-import sys
-from importlib import import_module
-from typing import Any, List
+from typing import Any
 
-import aether as _aether
-from aether import __version__ as __version__
-from aether import *  # noqa: F403
+__version__ = "2.0.0"
 
-# Preferred explicit surface for new code
-from aether.exec_engine import ExoExecEngine, AetherExecEngine  # noqa: E402
-from aether.compact import (  # noqa: E402
-    MAX_COMPACT_CHARS,
-    MAX_COMPACT_REFS,
-    compact_payload,
-)
-from aether.config import ExoConfig, AetherConfig  # noqa: E402
+# Preferred public names. Heavy modules load on first attribute access.
+__all__ = [
+    "ExoExecEngine",
+    "AetherExecEngine",
+    "ExoConfig",
+    "AetherConfig",
+    "SafetyGate",
+    "SafetyConfig",
+    "PerceptionEngine",
+    "ActionEngine",
+    "SmartController",
+    "Target",
+    "ActionOutcome",
+    "CuaBackend",
+    "LocalBackend",
+    "SyntheticBackend",
+    "PywinautoBackend",
+    "get_best_backend",
+    "LocalGrounder",
+    "GroundedElement",
+    "UIMemory",
+    "list_monitor_dicts",
+    "get_monitor",
+    "filter_windows_for_monitor",
+    "MacroStore",
+    "CursorManager",
+    "VirtualCursor",
+    "QueueHub",
+    "BrowserEngine",
+    "BrowserEngineSync",
+    "MAX_COMPACT_CHARS",
+    "MAX_COMPACT_REFS",
+    "compact_payload",
+    "__version__",
+]
 
-_SUBMODULES = (
-    "exec_engine",
-    "browser",
-    "compact",
-    "files_ops",
-    "registry_ops",
-    "infra_ops",
-    "smart",
-    "safety",
-    "desktop_lease",
-    "clipboard",
-    "config",
-    "paths",
-)
+_LAZY = {
+    "ExoExecEngine": ("exo_control.exec_engine", "ExoExecEngine"),
+    "AetherExecEngine": ("exo_control.exec_engine", "AetherExecEngine"),
+    "ExoConfig": ("exo_control.config", "ExoConfig"),
+    "AetherConfig": ("exo_control.config", "AetherConfig"),
+    "SafetyGate": ("exo_control.safety", "SafetyGate"),
+    "SafetyConfig": ("exo_control.safety", "SafetyConfig"),
+    "PerceptionEngine": ("exo_control.perception", "PerceptionEngine"),
+    "ActionEngine": ("exo_control.action", "ActionEngine"),
+    "SmartController": ("exo_control.smart", "SmartController"),
+    "Target": ("exo_control.smart", "Target"),
+    "ActionOutcome": ("exo_control.smart", "ActionOutcome"),
+    "CuaBackend": ("exo_control.backends", "CuaBackend"),
+    "LocalBackend": ("exo_control.backends", "LocalBackend"),
+    "get_best_backend": ("exo_control.backends", "get_best_backend"),
+    "LocalGrounder": ("exo_control.grounding", "LocalGrounder"),
+    "GroundedElement": ("exo_control.grounding", "GroundedElement"),
+    "UIMemory": ("exo_control.memory", "UIMemory"),
+    "list_monitor_dicts": ("exo_control.monitors", "list_monitor_dicts"),
+    "get_monitor": ("exo_control.monitors", "get_monitor"),
+    "filter_windows_for_monitor": ("exo_control.monitors", "filter_windows_for_monitor"),
+    "MacroStore": ("exo_control.macros", "MacroStore"),
+    "MAX_COMPACT_CHARS": ("exo_control.compact", "MAX_COMPACT_CHARS"),
+    "MAX_COMPACT_REFS": ("exo_control.compact", "MAX_COMPACT_REFS"),
+    "compact_payload": ("exo_control.compact", "compact_payload"),
+}
 
 
-def _alias_submodules() -> None:
-    for name in _SUBMODULES:
-        mod_name = f"{__name__}.{name}"
-        if mod_name in sys.modules:
-            continue
+def __getattr__(name: str) -> Any:
+    if name in {"SyntheticBackend", "CursorManager", "VirtualCursor", "QueueHub"}:
         try:
-            sys.modules[mod_name] = import_module(f"aether.{name}")
-        except ImportError:
-            continue
+            from exo_control import synthetic as syn
+            return getattr(syn, name)
+        except Exception as exc:
+            raise AttributeError(name) from exc
+    if name == "PywinautoBackend":
+        try:
+            from exo_control.backends_win import PywinautoBackend
+            return PywinautoBackend
+        except Exception as exc:
+            raise AttributeError(name) from exc
+    if name in {"BrowserEngine", "BrowserEngineSync"}:
+        try:
+            from exo_control.browser import BrowserEngine, BrowserEngineSync
+            return BrowserEngine if name == "BrowserEngine" else BrowserEngineSync
+        except Exception as exc:
+            raise AttributeError(name) from exc
+    spec = _LAZY.get(name)
+    if spec is None:
+        raise AttributeError(f"module 'exo_control' has no attribute {name!r}")
+    mod_name, attr = spec
+    from importlib import import_module
+    return getattr(import_module(mod_name), attr)
 
 
-_alias_submodules()
-
-__all__ = sorted(
-    {
-        "ExoExecEngine",
-        "AetherExecEngine",
-        "ExoConfig",
-        "AetherConfig",
-        "MAX_COMPACT_CHARS",
-        "MAX_COMPACT_REFS",
-        "compact_payload",
-        "__version__",
-        *[n for n in globals() if not n.startswith("_") and n not in {"sys", "import_module", "Any", "List"}],
-    }
-)
+def __dir__() -> list:
+    return sorted(set(__all__) | set(globals()))

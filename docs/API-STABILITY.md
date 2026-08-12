@@ -1,13 +1,14 @@
-# API stability (v1.1)
+# API stability (v2.0)
 
-## Stable for v1.x
+## Stable
 
 - Python: `import exo_control` / `from exo_control import ExoExecEngine` (**preferred**)
-- Python: `import aether` and `aether.*` (**compat** through 1.x)
+- Python: `import aether` and `aether.*` (**compat shim** — implementation is `exo_control`)
 - Python: `AetherExecEngine` is an alias of `ExoExecEngine`
 - CLI: `exo-control` (preferred); `aether` entry point still works
-- MCP tools: `exo_*` preferred; `aether_*` aliases remain
+- MCP tools: `exo_exec` / `exo_screenshot` / `exo_help`. `aether_*` only when `EXO_MCP_ALIASES=1`
 - MCP op names: existing ops remain; additive fields only
+- 1.3 honesty: `lease_status` no longer returns `token`; files `confirm` no longer escapes allowroots
 
 ## State directories
 
@@ -40,5 +41,4 @@ flagged as `via: "clipboard"`.
 
 ## Physical package layout
 
-Internal module folder remains `src/aether/` until a future major.  
-Do not break `aether.*` imports in 1.x patches.
+Implementation folder is `src/exo_control/`. `src/aether/` is a shim. Do not break `aether.*` imports in 2.x patches.

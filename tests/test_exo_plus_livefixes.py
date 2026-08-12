@@ -31,12 +31,20 @@ def test_notify_env_stub_ignored_live_default(monkeypatch, lease_home):
 
     monkeypatch.setattr("aether.exec_engine._notify_toast", fake_toast)
     eng = AetherExecEngine(controller=type("C", (), {"list_windows": lambda self: []})())
-    live = eng.execute([{"op": "notify", "title": "Live", "body": "toast"}])
+    live = eng.execute([
+        {"op": "lease_acquire", "agent_id": "n", "task": "toast", "ttl_sec": 20},
+        {"op": "notify", "title": "Live", "body": "toast"},
+        {"op": "lease_release"},
+    ])
     assert live["ok"] is True
-    assert live["steps"][0]["result"].get("stub") is False
+    assert live["steps"][1]["result"].get("stub") is False
     assert calls and calls[0][0] == "Live"
-    stub = eng.execute([{"op": "notify", "title": "X", "body": "Y", "stub": True}])
-    assert stub["steps"][0]["result"].get("stub") is True
+    stub = eng.execute([
+        {"op": "lease_acquire", "agent_id": "n2", "task": "toast2", "ttl_sec": 20},
+        {"op": "notify", "title": "X", "body": "Y", "stub": True},
+        {"op": "lease_release"},
+    ])
+    assert stub["steps"][1]["result"].get("stub") is True
 
 
 def test_browser_wait_timeout_seconds(monkeypatch, lease_home):

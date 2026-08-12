@@ -6,11 +6,10 @@ Grade pass/fail only. North star: elite realtime computer use across desktop, br
 
 Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAvgErix/ExoControl) · Family: Exo Launcher / Exo Control
 
-## Floor (must already hold)
+## Floor
 
-- [x] Acceptance checklist green (`docs/ACCEPTANCE.md`)
-- [x] Plus P0 all [x] on disk (`docs/CAPABILITY-PLUS.md`), including multi-window orchestration + DOM loop with honest clear/back
-- Plus P1 may trail; does not block shipping, but GA requires Floor [x]
+- [x] Live Notepad loop in `tests/test_live_notepad.py` (lease → launch → type → verify → close)
+- [x] Compact observe, leased hands, confirm gates, anti-cheat deny
 
 ## P0 — Token & efficiency (first-class)
 
@@ -34,7 +33,7 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 
 ## P0 — Files
 
-- [x] `files_list` / read / write / copy / move / delete under an allowrooted agent workspace; paths outside roots require `confirm=true`
+- [x] `files_list` / read / write / copy / move / delete under an allowrooted agent workspace; paths outside roots stay denied unless the operator sets `EXO_ALLOW_OUTSIDE_ROOTS=1` *and* `confirm=true`
 - [x] Open file via shell (`open_path`) and verify window or honest fail
 - [x] No recursive wipe without confirm; deny leaves audit line
 

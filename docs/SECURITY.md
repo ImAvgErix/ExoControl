@@ -1,3 +1,1 @@
-# Security (docs pointer)
-
-See root [SECURITY.md](../SECURITY.md). Capability bar: [CAPABILITY.md](CAPABILITY.md).
+See the root [SECURITY.md](../SECURITY.md) for the 1.3 honesty policy (lease, confirm, allowroots, operator env).

@@ -1,32 +1,22 @@
-"""Exo Control v1.2.0 — realtime PC eyes/hands for any AI (MCP + CLI + Python)."""
-__version__ = "1.2.0"
-from .perception import PerceptionEngine
-from .action import ActionEngine
-from .smart import SmartController, Target, ActionOutcome
-from .backends import CuaBackend, LocalBackend, get_best_backend
-from .grounding import LocalGrounder, GroundedElement
-from .memory import UIMemory
-from .monitors import list_monitor_dicts, get_monitor, filter_windows_for_monitor
-from .safety import SafetyGate, SafetyConfig
-from .config import AetherConfig, ExoConfig
-from .macros import MacroStore
-try:
-    from .synthetic import SyntheticBackend, CursorManager, VirtualCursor, QueueHub
-except ImportError:
-    SyntheticBackend = CursorManager = VirtualCursor = QueueHub = None
-try:
-    from .backends_win import PywinautoBackend
-except ImportError:
-    PywinautoBackend = None
-try:
-    from .browser import BrowserEngine, BrowserEngineSync
-except ImportError:
-    BrowserEngine = BrowserEngineSync = None
-__all__ = [
-    "PerceptionEngine", "ActionEngine", "SmartController", "Target", "ActionOutcome",
-    "CuaBackend", "LocalBackend", "SyntheticBackend", "PywinautoBackend", "get_best_backend",
-    "LocalGrounder", "GroundedElement", "UIMemory", "SafetyGate", "SafetyConfig",
-    "list_monitor_dicts", "get_monitor", "filter_windows_for_monitor",
-    "AetherConfig", "ExoConfig", "MacroStore", "CursorManager", "VirtualCursor", "QueueHub",
-    "BrowserEngine", "BrowserEngineSync", "__version__",
-]
+"""Compat package. Prefer ``from exo_control import ExoExecEngine``.
+
+``import aether`` and ``aether.*`` remain for existing callers.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import exo_control
+from exo_control import __version__ as __version__
+
+
+def __getattr__(name: str) -> Any:
+    return getattr(exo_control, name)
+
+
+def __dir__() -> list:
+    return sorted(set(getattr(exo_control, "__all__", ())) | set(globals()))
+
+
+# Submodules live as on-disk shims (aether/exec_engine.py etc.).
+# Do not eagerly import every exo_control module — mcp_server warns on import.

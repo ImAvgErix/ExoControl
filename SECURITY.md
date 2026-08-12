@@ -1,25 +1,43 @@
 # Security Policy
 
-## Hard stops (will not implement)
+Exo Control runs as the logged-in Windows user. It is **not a sandbox**. Anyone who can call MCP / CLI / `ExoExecEngine` has that user's desktop.
 
-- Anti-cheat bypass / kernel tampering
-- Credential dumping or silent elevation
-- Default-on screenshots, raw HTML dumps, unbounded observe trees
-- Registry / service / process-kill mutation without explicit `confirm=true`
-- Claiming "full OS control" while files/registry/services are stubs
+`confirm=true` is an **agent assertion**, not a human prompt. It does not widen filesystem roots or steal a lease.
+
+## Hard stops (enforced in code)
+
+- Anti-cheat process names (fail closed if a kill PID cannot be resolved)
+- Critical Windows services
+- HKLM registry writes
+- Non-loopback CDP attach
+- `browser_eval` without `confirm=true` (`EXO_DENY_BROWSER_EVAL=1` hard-denies)
+- Recursive delete without `confirm=true`
+- Paths outside `EXO_FILE_ROOTS` unless the operator sets `EXO_ALLOW_OUTSIDE_ROOTS=1`
+- Secret-like `env_get` values unless `EXO_ALLOW_ENV_VALUES=1`
+- Lease token hidden from `lease_status`
+- Unconditional `force_release` unless `EXO_ALLOW_FORCE_RELEASE=1`
+
+## Operator env (the real gates)
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `EXO_FILE_ROOTS` | `~/.exo/workspace` | Allowrooted file ops |
+| `EXO_ALLOW_OUTSIDE_ROOTS` | off | Permit `confirm=true` outside roots |
+| `EXO_ALLOW_ENV_VALUES` | off | Return secret-like env values |
+| `EXO_ALLOW_FORCE_RELEASE` | off | Wipe any lease |
+| `EXO_DENY_BROWSER_EVAL` | off | Hard-deny JS eval |
+| `EXO_MCP_ALIASES` | off | Register `aether_*` MCP tools |
+| `EXO_SCREENSHOT_ON_FAIL` | off | Attach JPEG on failed steps |
+| `EXO_LEASE_MAX_TTL` | 1800 | Max lease seconds |
 
 ## Reporting
 
 Open a private security advisory on this repo, or contact the maintainer (ImAvgErix) via GitHub.
 
-## Status
-
-Exo Control is a developer library (pip / MCP / CLI). Prefer import `exo_control`; `aether.*` is a stable technical compat path. Capability bar: [docs/CAPABILITY.md](docs/CAPABILITY.md).
-
 ## Lease model
 
-Desktop hands require an acquired lease. Agents share the machine; they do not own it. Force-release is audited.
+Desktop hands require an acquired lease. Agents share the machine; they do not own it. Same-agent acquire renews. Foreign force-release is audited and operator-gated.
 
 ## Confirm gates
 
-Destructive ops (kill process, registry write, service start/stop/restart, delete outside allowroots, recursive wipe) require `confirm=true`. Denies leave an audit line.
+Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk."

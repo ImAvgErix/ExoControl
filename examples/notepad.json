@@ -1,0 +1,12 @@
+{
+  "steps": [
+    {"op": "lease_acquire", "agent_id": "demo", "task": "notepad", "ttl_sec": 90},
+    {"op": "launch", "app": "notepad"},
+    {"op": "type", "text": "hello from Exo Control"},
+    {"op": "verify", "text": "hello from Exo Control"}
+  ],
+  "finally": [
+    {"op": "window_close", "title": "Notepad", "discard_unsaved": true},
+    {"op": "lease_release"}
+  ]
+}

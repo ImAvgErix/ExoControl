@@ -169,7 +169,7 @@ def test_kill_switch_blocks_mutating_zero_injects(lease_home):
 
     eng.execute([{"op": "kill_switch", "armed": False}])
     # Prior script acquired a lease then stopped on kill_switch — clear sticky claim.
-    eng.execute([{"op": "lease_force_release"}])
+    eng.execute([{"op": "lease_force_release", "agent_id": "k"}])
     ok = eng.execute(
         [
             {"op": "lease_acquire", "agent": "k2", "task": "ks2", "ttl_sec": 30},
@@ -213,10 +213,7 @@ def test_destructive_requires_confirm(lease_home):
     assert "confirm" in err.lower() or "destructive" in err.lower()
     assert stub.injects == 0
 
-    # cleanup lease
-    st = desktop_lease.status()
-    if st.get("token"):
-        desktop_lease.release(st["token"])
+    desktop_lease.force_release(agent_id="d")
 
     ok = eng.execute(
         [
@@ -287,11 +284,12 @@ def test_cross_engine_release_by_token(lease_home):
     assert acq["ok"] is True
     token = acq["steps"][0]["result"]["token"]
 
-    # Fresh engine (no in-process token) releases by explicit token from status
+    # Fresh engine (no in-process token) releases by explicit token from acquire
     eng_b = AetherExecEngine(controller=SafetyStub())
     st = eng_b.execute([{"op": "lease_status"}])["steps"][0]["result"]
     assert st["held"] is True
-    assert st["token"] == token
+    assert "token" not in st
+    assert st.get("has_token") is True
 
     rel = eng_b.execute([{"op": "lease_release", "token": token}])
     assert rel["ok"] is True
@@ -307,7 +305,7 @@ def test_lease_force_release_and_acquire(lease_home):
     a = desktop_lease.acquire("sticky", "stuck", ttl_sec=120)
     assert a["ok"] is True
     eng = AetherExecEngine(controller=SafetyStub())
-    forced = eng.execute([{"op": "lease_force_release"}])
+    forced = eng.execute([{"op": "lease_force_release", "agent_id": "sticky"}])
     assert forced["ok"] is True
     assert forced["steps"][0]["result"].get("released") is True
     b = eng.execute([{"op": "lease_acquire", "agent": "fresh", "task": "ok", "ttl_sec": 30}])

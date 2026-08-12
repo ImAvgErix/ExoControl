@@ -122,10 +122,11 @@ def test_files_outside_root_gates(lease_home, monkeypatch):
 
     denied = files_ops.files_list(str(outside), confirm=False)
     assert denied["ok"] is False
-    assert "confirm" in denied["error"]
+    assert "allowroot" in denied["error"] or "EXO_FILE_ROOTS" in denied["error"]
 
-    allowed = files_ops.files_list(str(outside), confirm=True)
-    assert allowed["ok"] is True
+    still = files_ops.files_list(str(outside), confirm=True)
+    assert still["ok"] is False
+    assert "EXO_ALLOW_OUTSIDE_ROOTS" in still["error"] or "allowroot" in still["error"]
 
     # recursive delete denied without confirm
     nest = root / "nest"
@@ -232,9 +233,7 @@ def test_service_control_requires_confirm(lease_home):
         ]
     )
     assert denied["steps"][1]["result"]["ok"] is False
-    st = desktop_lease.status()
-    if st.get("token"):
-        desktop_lease.release(st["token"])
+    desktop_lease.force_release(agent_id="svc")
 
 
 def test_observe_budget_stats(lease_home):

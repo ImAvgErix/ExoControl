@@ -43,7 +43,7 @@ You control a Windows PC via Exo Control.
       "command": "python",
       "args": ["-m", "exo_control.slim_mcp_server"],
       "env": {
-        "AETHER_PREFER_CUA": "0"
+        "EXO_PREFER_CUA": "0"
       }
     }
   }
@@ -129,21 +129,15 @@ Or MCP: `exo_help` with optional `query`.
 ## Install once
 
 ```bash
-git clone https://github.com/ImAvgErix/ExoControl.git
-cd ExoControl
-pip install -e .
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.0.0"
+exo-control doctor
+# optional CDP:
+pip install "exo-control[browser]"
 playwright install chromium
-exo-control ops
 ```
 
-Optional live path used by some agents:
-
-```
-%USERPROFILE%\.aether\aether-driver\src
-```
-
-Keep it synced with this repo (or `pip install -e .` into the interpreter the harness uses).
+Do **not** set `PYTHONPATH` to `~\.aether\aether-driver` or `Documents\exo-control` — those shadow the installed package.
 
 ## Versioning
 
-Exo Control is a **library** (`pip install -e .`). There is no Setup.exe and no GitHub Release assets. Version is in `pyproject.toml`; use git history for changes. Binary installers live on [Exo Launcher](https://github.com/ImAvgErix/ExoLauncher) only.
+Exo Control is a **library**. Version is in `pyproject.toml`. Wheels may ship as GitHub Release assets; there is no Setup.exe. Binary installers live on [Exo Launcher](https://github.com/ImAvgErix/ExoLauncher) only.

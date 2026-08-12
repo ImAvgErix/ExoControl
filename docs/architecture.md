@@ -1,19 +1,19 @@
-# Aether v1.4 Architecture
+# Exo Control 1.3 architecture
 
 ```
 Agent (any model / any harness)
-        │ MCP
+        │ MCP / CLI / Python
         ▼
- SmartController
-   ├─ UIMemory (successful targets)
-   ├─ Observation cache (TTL)
-   ├─ find_targets: memory → Cua a11y → fused OCR/structure → OCR → coords
-   ├─ smart_click / type / scroll / drag / hotkey
-   ├─ batch(actions[])
-   ├─ backends: CuaBackend | LocalBackend
-   ├─ LocalGrounder (OpenCV + OCR)
-   └─ BrowserEngine (Playwright Spaces)
+ ExoExecEngine.execute(steps, finally)
+   ├─ lease + policy + safety gates
+   ├─ ops_catalog (source of truth for lease / help)
+   ├─ SmartController (internal hands/eyes)
+   │    ├─ UIA cache + STA marshal
+   │    ├─ synthetic inject (preferred)
+   │    └─ compact observe / read / verify
+   ├─ files / registry / infra (allowrooted, confirm-gated)
+   └─ BrowserEngine (optional Playwright, loopback CDP)
 ```
 
-Loop: Observe → Ground → Act → Verify → Memory update → Retry if needed
-
+Public import: `from exo_control import ExoExecEngine`.  
+MCP: `python -m exo_control.slim_mcp_server` (`exo_exec`, `exo_screenshot`, `exo_help`).

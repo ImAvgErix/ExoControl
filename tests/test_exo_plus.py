@@ -48,9 +48,13 @@ def test_notify_real_path_invokes_powershell(monkeypatch, lease_home):
     assert any("powershell" in str(c[0]).lower() or (isinstance(c, list) and "powershell" in c[0].lower()) for c in calls)
 
     eng = AetherExecEngine(controller=_WinStub())
-    result = eng.execute([{"op": "notify", "title": "Aether", "body": "hello"}])
+    result = eng.execute([
+        {"op": "lease_acquire", "agent_id": "n", "task": "toast", "ttl_sec": 20},
+        {"op": "notify", "title": "Aether", "body": "hello"},
+        {"op": "lease_release"},
+    ])
     assert result["ok"] is True
-    step = result["steps"][0]["result"]
+    step = result["steps"][1]["result"]
     assert step.get("stub") is not True
     assert step.get("ok") is True
 

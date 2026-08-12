@@ -18,6 +18,7 @@ def lease_dirs(tmp_path, monkeypatch):
     state.mkdir()
     monkeypatch.setenv("AETHER_LOCK_DIR", str(lock))
     monkeypatch.setenv("AETHER_STATE_DIR", str(state))
+    monkeypatch.setenv("AETHER_FILE_ROOTS", str(tmp_path))
     monkeypatch.setenv("AETHER_NOTIFY_STUB", "1")
     # Ensure no leftover claim
     desktop_lease.release("noop")
@@ -155,7 +156,7 @@ def test_notify_stub_and_files_list(lease_dirs, tmp_path):
     d = tmp_path / "files"
     d.mkdir()
     (d / "a.txt").write_text("x", encoding="utf-8")
-    listed = eng.execute([{"op": "files_list", "path": str(d), "confirm": True}])
+    listed = eng.execute([{"op": "files_list", "path": str(d)}])
     assert listed["ok"] is True
     names = [e["name"] for e in listed["steps"][0]["result"]["entries"]]
     assert "a.txt" in names
