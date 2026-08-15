@@ -5,19 +5,18 @@ This is a library (pip / wheel), not a Setup.exe. GitHub Release may include the
 
 ## 2.2.0
 
-Perplexity Search as Code — lease-free web retrieval for any harness.
+Live seat, Pilot, stock Windows natives, and the desk-ops catalog.
 
-- **`search` / `search_web`.** Fan-out one or more queries through the Perplexity Search API, then filter / dedupe / rank in the result. Not UI find — use `type`/`click` for in-app search boxes.
+- **Live seat.** `session_open` / `seat` takes the desk like remote access (lease + eyes) and holds it across `execute()` calls until `session_close`. `session_status` never returns the token. `pointer` / `mouse` / `keypress` / `drive` are raw SendInput HID (not UIA, not RDP).
+- **Pilot.** `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`. When a goal is set, successful hands re-glance and attach `changed`.
+- **`ready`.** Honest map: works here / Windows-native / needs a key. `stt` stays a stub.
+- **Stock Windows natives** (ctypes / netsh / PowerShell / COM, no extra pip): volume, recycle, TTS, wifi, power, print, dialog, lnk, certs, winsearch walk, lock, idle, brightness, dark_mode, ports, uptime, USB, Bluetooth, printers, BitLocker status, Defender status, hotfixes, fonts.
+- **`search` / `search_web`.** Fan-out queries (`provider=perplexity|tavily|exa|ddg|serper|brave`). Not UI find. Auth for Perplexity is `PERPLEXITY_API_KEY`; missing key fails closed.
 - **`search_content` / `search_snippets`.** Query-relevant snippets scoped to `urls`.
-- Auth is `PERPLEXITY_API_KEY` (alias `EXO_PERPLEXITY_API_KEY`). Missing key fails closed with `AUTHENTICATION`.
-- Windows-safe HTTP contract. The compiled `pplx-srch-sdk` package is Linux/macOS + CPython 3.12 only and is not required.
-- Lease-free. Compact snippets by default (`verbose=true` for longer extracts).
-- **Browser Use Cloud.** `browser_use` (hosted task / poll `run_id`), `browser_use_start` / `browser_use_stop` for a managed Chromium. `browser_connect` accepts `provider=browser-use` or a Browser Use `cdp_url` when `BROWSER_USE_API_KEY` is set. Remote CDP stays denied unless it is Browser Use or `EXO_ALLOW_REMOTE_CDP=1`.
-- **ego lite.** Status-only. Exo Control is Windows-only; ego lite has no Windows app. Local page UI stays `browser_*` Playwright spaces.
-- **Addon ops (Windows-safe HTTP or local).** Firecrawl `scrape` / `crawl` / `site_map`; MarkItDown `files_convert`; Stagehand `stagehand` / `browser_act`; Skyvern `skyvern`; OmniParser `omni`; AgentQL `agentql`; Everything `files_find` (walk fallback); Mem0/local `memory_add` / `memory_search`; Composio/Graph `mail_list` / `cal_next` / `drive_get`; Screenpipe `recall`. Missing keys fail closed. Mutating Composio actions need `confirm=true`.
-- **Wave 1 desk ops.** Graph `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (local CSV or workbook); Jina `read_url`; allowrooted `git`; GitHub `gh_pr`; Windows `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`; leased `window_move`; CDP `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`. `mail_send`, volume set, and recycle empty need `confirm=true`.
-- **Wave 2 desk ops.** Docling `docling`; local `rag`; Windows Search `winsearch`; Steel `steel_start` / `steel_stop`; Tavily / Exa search; Slack / Notion / Linear; `pwsh` / `wsl` / `docker`; `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`. Slack post, pwsh, wsl exec, docker run, print, dialog, power sleep, and lnk create need `confirm=true`.
-- **Waves 3–5.** Graph writes `cal_add` / `todo_add` / `contacts` / `drive_put` / `mail_reply`; CDP `browser_back` / `forward` / `reload` / `select` / `upload` / `dialog` / `storage` / `cookies` / `console` / `viewport`; open data `ddg` / `wiki` / `weather` / `rss` / `hn` / `arxiv`; SaaS `jira` / `discord` / `airtable` / `trello` / `asana` / `gh_issue` / `telegram` / `serper` / `brave`; files `zip` / `unzip` / `files_mkdir` / `files_stat` / `tree` / `diff_files` / `sqlite` / `pdf_info` / `image_info` / `b64`; sys `which` / `now` / `uuid_gen` / `ip_addr` / `dns` / `ping` / `lock_pc` and Windows status hooks. Cookie values, Graph writes, unzip, sqlite writes, telegram, and lock need `confirm=true`. No LSASS/UAC/anti-cheat/captcha/secret-dump ops.
+- **Browser Use Cloud.** `browser_use`, `browser_use_start` / `browser_use_stop`. `browser_connect` accepts `provider=browser-use` when `BROWSER_USE_API_KEY` is set.
+- **ego lite.** Status-only. Exo Control is Windows-only; local page UI stays `browser_*`.
+- **Merged families.** `search` `provider=`, `files_convert` `engine=markitdown|docling`, `scrape` `provider=firecrawl|jina`, `files_stat` with PDF/image extras. Old names stay as aliases.
+- **Addon + Waves 1–5.** Firecrawl, Stagehand, Skyvern, OmniParser, AgentQL, Everything, memory, Graph, Screenpipe, git, `gh_pr`, Steel, Slack/Notion/Linear/Jira/Discord, pwsh/wsl/docker, zip/sqlite/tree, open data, and Windows desk/sys ops. Writes, exec, lock, and cookie values need `confirm=true`. No LSASS / UAC / anti-cheat / captcha / secret-dump ops.
 
 ## 2.1.0
 
