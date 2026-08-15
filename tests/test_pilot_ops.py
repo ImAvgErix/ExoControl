@@ -161,6 +161,26 @@ def test_heal_fails_closed_without_error(tmp_roots):
     assert body.get("code") == "NOTHING_TO_HEAL"
 
 
+def test_goal_attaches_changed_after_hands(tmp_roots):
+    path = tmp_roots / "watch.txt"
+    eng = _engine()
+    glances = iter([
+        {"ok": True, "title": "Pad", "a11y_labels": ["File"]},
+        {"ok": True, "title": "Pad", "a11y_labels": ["File", "Saved"]},
+    ])
+    eng.ctrl.compact_observe = lambda **k: next(glances)
+    out = eng.execute([
+        {"op": "goal", "text": "Write and watch the UI"},
+        {"op": "lease_acquire", "agent_id": "p", "task": "watch", "ttl_sec": 20},
+        {"op": "files_write", "path": str(path), "text": "one"},
+        {"op": "files_write", "path": str(path), "text": "two"},
+        {"op": "lease_release"},
+    ])
+    assert out["ok"] is True
+    writes = [s["result"] for s in out["steps"] if s["op"] == "files_write"]
+    assert writes[1].get("changed", {}).get("added") == ["Saved"]
+
+
 def test_aether_pilot_shim():
     import aether.pilot_ops as shim
     import exo_control.pilot_ops as impl

@@ -52,7 +52,8 @@ def winsearch(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("winsearch")
-    return {"ok": False, "error": "Windows Search backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.winsearch(step)
 
 
 def print_file(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,7 +67,8 @@ def print_file(step: Dict[str, Any]) -> Dict[str, Any]:
         return resolved
     if sys.platform != "win32":
         return _windows_only("print")
-    return {"ok": False, "error": "print backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.print_file(step)
 
 
 def wifi(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -75,7 +77,8 @@ def wifi(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("wifi")
-    return {"ok": False, "error": "wifi backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.wifi(step)
 
 
 def power(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,7 +90,8 @@ def power(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("power")
-    return {"ok": False, "error": "power backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.power(step)
 
 
 def disk(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,7 +148,8 @@ def certs(step: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "path": str(p), "bytes": p.stat().st_size, "suffix": p.suffix.lower()}
     if sys.platform != "win32":
         return _windows_only("certs")
-    return {"ok": False, "error": "certificate store backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.certs(step)
 
 
 def file_hash(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -177,7 +182,8 @@ def lnk(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("lnk")
-    return {"ok": False, "error": "shortcut backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.lnk(step)
 
 
 def dialog(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -191,4 +197,5 @@ def dialog(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("dialog")
-    return {"ok": False, "error": "dialog backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.dialog(step)

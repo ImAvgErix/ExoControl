@@ -21,7 +21,7 @@ from exo_control import files_ops
 from exo_control import registry_ops
 from exo_control import infra_ops
 from exo_control.ops_catalog import lease_free_ops, lease_required_ops
-from exo_control.pilot_ops import Pilot
+from exo_control.pilot_ops import META_OPS, Pilot
 from exo_control.policy import (
     allow_screenshot_on_fail_default,
     deny_browser_eval,
@@ -350,6 +350,15 @@ class ExoExecEngine:
                 "eyes", "eyes_read", "look", "glance",
             }:
                 self._pilot.note_glance(value)
+            elif self._pilot.goal and op not in META_OPS and self._is_mutating_op(op, work):
+                try:
+                    obs = self.ctrl.compact_observe()
+                    if isinstance(obs, dict) and obs.get("ok") is not False:
+                        self._pilot.note_glance(obs)
+                        if isinstance(value, dict) and len(self._pilot.glances) >= 2:
+                            value = {**value, "changed": self._pilot.changed()}
+                except Exception:
+                    pass
         else:
             self._pilot.note_failure(work, op)
         if not ok:
@@ -690,6 +699,15 @@ class ExoExecEngine:
         if not failed:
             return {"ok": False, "error": "nothing to heal", "code": "NOTHING_TO_HEAL"}
         self._pilot.heal_used = True
+        glance = None
+        try:
+            from exo_control.pilot_ops import glance_from
+            obs = self.ctrl.compact_observe()
+            if isinstance(obs, dict) and obs.get("ok") is not False:
+                self._pilot.note_glance(obs)
+                glance = glance_from(obs)
+        except Exception:
+            glance = None
         retry_op = str(failed.get("op") or "")
         retried = _normalize_result(retry_op, self._run_step(retry_op, failed))
         if _step_ok(retried):
@@ -698,13 +716,14 @@ class ExoExecEngine:
             if snap:
                 self._pilot.push_undo(snap)
             self._pilot.remember_step(failed, retry_op)
-            return {"ok": True, "retried": retry_op, "result": retried}
+            return {"ok": True, "retried": retry_op, "result": retried, "glance": glance}
         return {
             "ok": False,
             "retried": retry_op,
             "error": retried.get("error") if isinstance(retried, dict) else "heal retry failed",
             "code": retried.get("code") if isinstance(retried, dict) else "HEAL_FAILED",
             "result": retried,
+            "glance": glance,
         }
 
 
@@ -1106,6 +1125,9 @@ class ExoExecEngine:
             return self._skill_run(step)
         if op == "heal":
             return self._heal(step)
+        if op in {"ready", "readiness"}:
+            from exo_control import addon_ops
+            return addon_ops.readiness()
         if op == "status":
             st = ctrl.status() if hasattr(ctrl, "status") else {"ok": True}
             if isinstance(st, dict):
@@ -1125,6 +1147,7 @@ class ExoExecEngine:
                     caps["ego_available"] = bool(ego.get("available"))
                     caps.update(addon_ops.capabilities())
                     caps["pilot"] = True
+                    caps["readiness"] = addon_ops.readiness()
             return st
         if op in {"windows", "list_windows"}:
             mon = step.get("monitor")

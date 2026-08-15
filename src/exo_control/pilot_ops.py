@@ -24,7 +24,7 @@ META_OPS = frozenset({
     "changed", "what_changed",
     "undo",
     "skill_save", "skill_run", "skill_list", "replay",
-    "heal",
+    "heal", "ready", "readiness",
     "help", "ops", "capabilities", "catalog", "status", "stats",
     "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
     "last_error", "error", "last_fail",

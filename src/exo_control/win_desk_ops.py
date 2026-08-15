@@ -49,7 +49,8 @@ def volume(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("volume")
-    return {"ok": False, "error": "volume native backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.volume(step)
 
 
 def winget(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -91,7 +92,8 @@ def recycle(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("recycle")
-    return {"ok": False, "error": "recycle native backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.recycle(step)
 
 
 def eventlog(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,7 +136,8 @@ def ocr_win(step: Dict[str, Any]) -> Dict[str, Any]:
             return denied
     if sys.platform != "win32":
         return _windows_only("ocr_win")
-    return {"ok": False, "error": "WinRT OCR backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.ocr_win(step)
 
 
 def stt(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -143,7 +146,8 @@ def stt(step: Dict[str, Any]) -> Dict[str, Any]:
         return hooked
     if sys.platform != "win32":
         return _windows_only("stt")
-    return {"ok": False, "error": "Windows Speech backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.stt(step)
 
 
 def tts(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -155,4 +159,5 @@ def tts(step: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "tts requires text", "code": "MISSING_TEXT"}
     if sys.platform != "win32":
         return _windows_only("tts")
-    return {"ok": False, "error": "SAPI TTS backend unavailable", "code": "UNAVAILABLE"}
+    from exo_control import win_native
+    return win_native.tts(step)

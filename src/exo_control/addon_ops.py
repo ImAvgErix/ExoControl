@@ -350,4 +350,38 @@ def capabilities() -> Dict[str, Any]:
         "sqlite": True,
         "which": True,
         "lock_pc": True,
+        "pilot": True,
+    }
+
+
+def readiness() -> Dict[str, Any]:
+    """Honest map: what works here vs Windows-only vs needs a key."""
+    import sys
+
+    from exo_control import search_ops
+    from exo_control.win_native import WINDOWS_NATIVE_OPS
+
+    ready = [
+        "help", "observe", "whoami", "hash", "disk", "git", "rag",
+        "files_stat", "zip", "which", "now", "uuid_gen", "ip_addr", "dns",
+        "pilot", "goal", "proof", "changed", "undo", "heal",
+    ]
+    windows_native = list(WINDOWS_NATIVE_OPS)
+    on_windows = sys.platform == "win32"
+    return {
+        "ok": True,
+        "honest": True,
+        "on_windows": on_windows,
+        "platform": sys.platform,
+        "ready": ready,
+        "windows_native": windows_native,
+        "windows_only": [] if on_windows else list(windows_native),
+        "needs_key": {
+            "search": {"ok": search_ops.configured(), "env": "PERPLEXITY_API_KEY"},
+            "tavily": {"ok": web_search_ops.tavily_configured(), "env": "TAVILY_API_KEY"},
+            "exa": {"ok": web_search_ops.exa_configured(), "env": "EXA_API_KEY"},
+            "firecrawl": {"ok": firecrawl_ops.configured(), "env": "FIRECRAWL_API_KEY"},
+            "graph": {"ok": graph_ops.configured(), "env": "MICROSOFT_GRAPH_TOKEN"},
+        },
+        "stub": ["stt"],
     }

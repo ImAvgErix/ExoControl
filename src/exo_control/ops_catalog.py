@@ -398,6 +398,9 @@ OPS: List[Dict[str, Any]] = [
     {"op": "heal", "aliases": [], "lease": False,
      "purpose": "One bounded retry of the last failed hand (after you fix lease/focus)",
      "fields": []},
+    {"op": "ready", "aliases": ["readiness"], "lease": False,
+     "purpose": "Honest map: what works here vs Windows-native vs needs a key",
+     "fields": []},
     # Hands (lease required)
     {"op": "focus", "aliases": ["smart_focus"], "lease": True,
      "purpose": "Foreground window by title/pid; optional monitor bind", "fields": ["title?", "pid?", "monitor?"]},
@@ -566,6 +569,7 @@ HARNESS_RULES: List[str] = [
     "pwsh/wsl exec/docker run, print, dialog, power sleep, lnk create need confirm=true.",
     "Waves 3–5: Graph writes, CDP extras, ddg/wiki/weather/hn, more SaaS, zip/sqlite/tree, which/dns/lock_pc.",
     "Pilot (original): goal → hands → checkpoint → proof. changed diffs glances. undo reverses writes. skill_save/run is muscle memory. heal retries the last miss once.",
+    "ready is the honest map (works here / Windows-native / needs a key). Windows desk ops use stock natives, not silent UNAVAILABLE.",
     "Exo Control is Windows-only. ego lite has no Windows app — use browser_* spaces, not ego-browser.",
 ]
 

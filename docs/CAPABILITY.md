@@ -77,6 +77,8 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
 - [x] Waves 3–5: Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/tree, sys status (no secret dump / UAC / anti-cheat)
 - [x] Pilot (original): `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`
+- [x] Stock Windows natives (ctypes/netsh/PowerShell/COM) for volume, lock, wifi, power, recycle, TTS, dialog, dark_mode, idle, ports, Defender status, …
+- [x] Honest `ready` map: what works here vs Windows-native vs needs a key (`stt` stays stub)
 
 ## Hard stops
 
