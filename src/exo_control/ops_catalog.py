@@ -167,7 +167,7 @@ OPS: List[Dict[str, Any]] = [
      "purpose": "Compact Application/System event log (Windows)",
      "fields": ["log?", "max?"]},
     {"op": "ocr_win", "aliases": ["win_ocr"], "lease": False,
-     "purpose": "WinRT OCR on an allowrooted image (Windows)",
+     "purpose": "WinRT OCR stub (use omni or files_convert)",
      "fields": ["path?"]},
     {"op": "stt", "aliases": ["speech_to_text"], "lease": False,
      "purpose": "Windows Speech recognition (Windows)",

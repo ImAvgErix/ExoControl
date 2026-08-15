@@ -81,6 +81,22 @@ def test_ready_is_honest_and_lease_free():
         assert body.get("on_windows") is False
 
 
+def test_ready_is_honest():
+    body = _result({"op": "ready"})
+    assert "stt" in body["stub"]
+    assert "ocr_win" in body["stub"]
+    assert "ocr_win" not in body["windows_native"]
+
+
+def test_ocr_win_stub_fail_closed():
+    from exo_control.win_native import ocr_win
+
+    out = ocr_win({"path": "x.png"})
+    assert out["ok"] is False
+    assert out.get("code") == "UNAVAILABLE"
+    assert not out.get("text")
+
+
 def test_desk_ops_call_native_on_windows(monkeypatch):
     import exo_control.win_desk_ops as desk
     import exo_control.win_native as native
