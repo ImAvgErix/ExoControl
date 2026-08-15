@@ -1,8 +1,10 @@
 """
 Aether Browser Control Layer
 
-Cross-platform browser automation that works on Windows *today*
-(while waiting for ego lite Windows).
+Cross-platform browser automation that works on Windows *today*.
+
+ego lite (citrolabs/ego-lite) is macOS-only; these Playwright spaces are the
+Windows stand-in. Browser Use Cloud is an optional remote Chromium (CDP).
 
 Design goals (inspired by ego lite, but practical now):
 - Persistent profiles → reuse real logins / cookies when possible
@@ -173,16 +175,17 @@ class BrowserEngine:
         page_title: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Attach to running Chromium/WebView2 debug port; bind Exo page by default."""
-        from exo_control.policy import is_loopback_endpoint
+        from exo_control.policy import is_allowed_cdp_endpoint, is_loopback_endpoint
 
         if not HAS_PLAYWRIGHT:
             return {"ok": False, "error": "playwright missing"}
-        if not is_loopback_endpoint(endpoint):
+        if not is_allowed_cdp_endpoint(endpoint):
             return {
                 "ok": False,
                 "error": "cdp_not_loopback",
                 "endpoint": endpoint,
-                "hint": "only 127.0.0.1 / localhost / ::1 CDP endpoints are allowed",
+                "loopback": is_loopback_endpoint(endpoint),
+                "hint": "loopback CDP, Browser Use (BROWSER_USE_API_KEY), or EXO_ALLOW_REMOTE_CDP=1",
             }
         if self._pw is None:
             self._pw = await async_playwright().start()

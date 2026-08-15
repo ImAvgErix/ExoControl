@@ -57,6 +57,8 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Clipboard image round-trip + real Windows notify toast
 - [x] Fuzzy launch → wait_window (PATH + alias + Start Menu)
 - [x] Perplexity Search as Code: lease-free `search` / `search_content` (HTTP; Windows-safe)
+- [x] Browser Use Cloud: `browser_use` hosted run + `browser_use_start` Chromium (Windows-reachable HTTP/CDP)
+- [x] ego lite: honest Windows-only miss (`ego`); local stand-in is `browser_*` spaces
 
 ## Hard stops
 

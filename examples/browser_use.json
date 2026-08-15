@@ -1,0 +1,5 @@
+{
+  "steps": [
+    {"op": "browser_use", "task": "Find the current top Show HN post title and URL"}
+  ]
+}

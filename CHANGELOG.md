@@ -12,6 +12,8 @@ Perplexity Search as Code — lease-free web retrieval for any harness.
 - Auth is `PERPLEXITY_API_KEY` (alias `EXO_PERPLEXITY_API_KEY`). Missing key fails closed with `AUTHENTICATION`.
 - Windows-safe HTTP contract. The compiled `pplx-srch-sdk` package is Linux/macOS + CPython 3.12 only and is not required.
 - Lease-free. Compact snippets by default (`verbose=true` for longer extracts).
+- **Browser Use Cloud.** `browser_use` (hosted task / poll `run_id`), `browser_use_start` / `browser_use_stop` for a managed Chromium. `browser_connect` accepts `provider=browser-use` or a Browser Use `cdp_url` when `BROWSER_USE_API_KEY` is set. Remote CDP stays denied unless it is Browser Use or `EXO_ALLOW_REMOTE_CDP=1`.
+- **ego lite.** Status-only. Exo Control is Windows-only; ego lite has no Windows app. Local page UI stays `browser_*` Playwright spaces.
 
 ## 2.1.0
 

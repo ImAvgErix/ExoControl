@@ -17,7 +17,7 @@ _STRIP_KEYS = frozenset({
     "html",
 })
 
-_TEXT_KEYS = frozenset({"text_sample", "text", "body", "snippet"})
+_TEXT_KEYS = frozenset({"text_sample", "text", "body", "snippet", "output"})
 _LIST_KEYS = frozenset({
     "elements", "refs", "a11y", "a11y_labels", "ocr", "entries",
     "values", "procs", "services", "tasks", "items",

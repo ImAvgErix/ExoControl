@@ -30,6 +30,8 @@ Exo Control runs as the logged-in Windows user. It is **not a sandbox**. Anyone 
 | `EXO_SCREENSHOT_ON_FAIL` | off | Attach JPEG on failed steps |
 | `EXO_LEASE_MAX_TTL` | 1800 | Max lease seconds |
 | `PERPLEXITY_API_KEY` | unset | Enables lease-free `search` / `search_content` (queries leave the machine) |
+| `BROWSER_USE_API_KEY` | unset | Enables Browser Use Cloud (`browser_use` / cloud CDP). Traffic leaves the machine |
+| `EXO_ALLOW_REMOTE_CDP` | off | Permit non-loopback CDP that is not Browser Use |
 
 ## Reporting
 

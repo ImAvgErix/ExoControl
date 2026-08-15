@@ -130,6 +130,7 @@ class ExoExecEngine:
         self._last_error: Optional[Dict[str, Any]] = None
         self._script_launched_pids: List[int] = []
         self._eyes_started_by_lease = False
+        self._browser_use_session: Optional[str] = None
 
     def _get_browser(self):
         if self._browser is None:
@@ -498,6 +499,9 @@ class ExoExecEngine:
             "startup_list", "observe_budget",
             "search", "search_web", "pplx_search", "web_search",
             "search_content", "search_snippets", "pplx_content",
+            "browser_use", "browser_use_task", "browser_use_run",
+            "browser_use_start", "browser_cloud", "browser_use_stop",
+            "ego", "ego_status", "ego_lite",
         }:
             needs = False
         if not needs:
@@ -527,6 +531,9 @@ class ExoExecEngine:
                 "env_get", "env_list", "tasks_list", "startup_list",
                 "search", "search_web", "pplx_search", "web_search",
                 "search_content", "search_snippets", "pplx_content",
+                "browser_use", "browser_use_task", "browser_use_run",
+                "browser_use_start", "browser_cloud", "browser_use_stop",
+                "ego", "ego_status", "ego_lite",
             }:
                 return False
         if op == "proc":
@@ -796,6 +803,7 @@ class ExoExecEngine:
             "browser_snapshot", "read_ui", "read",
             "search", "search_web", "pplx_search", "web_search",
             "search_content", "search_snippets", "pplx_content",
+            "browser_use", "browser_use_task", "browser_use_run",
         }
         if op not in compact_ops:
             return value
@@ -1021,6 +1029,13 @@ class ExoExecEngine:
                 if isinstance(caps, dict):
                     caps["search_web"] = True
                     caps["search_configured"] = search_ops.configured()
+                    from exo_control import browser_use_ops, ego_ops
+                    caps["browser_use"] = True
+                    caps["browser_use_configured"] = browser_use_ops.configured()
+                    caps["ego_lite"] = False
+                    caps["ego_windows_ready"] = False
+                    ego = ego_ops.detect()
+                    caps["ego_available"] = bool(ego.get("available"))
             return st
         if op in {"windows", "list_windows"}:
             mon = step.get("monitor")
@@ -1254,9 +1269,28 @@ class ExoExecEngine:
         if op == "stats":
             return ctrl.stats(reset=bool(step.get("reset", False)))
 
+        if op in {"browser_use", "browser_use_task", "browser_use_run"}:
+            from exo_control import browser_use_ops
+            return browser_use_ops.run_task(step)
+        if op in {"browser_use_start", "browser_cloud"}:
+            from exo_control import browser_use_ops
+            out = browser_use_ops.start_browser(step)
+            if out.get("ok") and out.get("id"):
+                self._browser_use_session = str(out["id"])
+            return out
+        if op == "browser_use_stop":
+            from exo_control import browser_use_ops
+            out = browser_use_ops.stop_browser(step, default_id=self._browser_use_session)
+            if out.get("ok"):
+                self._browser_use_session = None
+            return out
+        if op in {"ego", "ego_status", "ego_lite"}:
+            from exo_control import ego_ops
+            return ego_ops.detect()
+
         browser = self._get_browser() if op.startswith("browser_") else None
         if op == "browser_connect":
-            return browser.connect_cdp(step.get("endpoint", "http://127.0.0.1:9222"), page_url=step.get("page_url") or step.get("url_contains"), page_title=step.get("page_title") or step.get("title"))
+            return self._browser_connect(browser, step)
         if op == "browser_spaces":
             return browser.list_spaces()
         if op == "browser_create_space":
@@ -1927,6 +1961,35 @@ class ExoExecEngine:
                     "timeout": timeout_s,
                     "crashed": True,
                 }
+
+    def _browser_connect(self, browser: Any, step: Dict[str, Any]) -> Dict[str, Any]:
+        provider = str(step.get("provider") or step.get("backend") or "").strip().lower().replace("-", "_")
+        page_url = step.get("page_url") or step.get("url_contains")
+        page_title = step.get("page_title") or step.get("title")
+        endpoint = step.get("cdp_url") or step.get("endpoint") or step.get("url")
+        if provider in {"browser_use", "cloud"}:
+            from exo_control import browser_use_ops
+            started = browser_use_ops.start_browser(step)
+            if not started.get("ok"):
+                return started
+            if started.get("id"):
+                self._browser_use_session = str(started["id"])
+            endpoint = started.get("cdp_url")
+            if not endpoint:
+                return {**started, "ok": False, "error": "browser-use session has no cdp_url"}
+            attached = browser.connect_cdp(str(endpoint), page_url=page_url, page_title=page_title)
+            if isinstance(attached, dict):
+                return {
+                    **started,
+                    **attached,
+                    "provider": "browser-use",
+                    "browser_id": started.get("id"),
+                }
+            return attached
+        if endpoint is None:
+            port = step.get("port")
+            endpoint = f"http://127.0.0.1:{int(port)}" if port is not None else "http://127.0.0.1:9222"
+        return browser.connect_cdp(str(endpoint), page_url=page_url, page_title=page_title)
 
     def _wait_cdp(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """Poll discover_cdp_endpoints until count>0 or timeout (default 15s)."""

@@ -2330,6 +2330,9 @@ class SmartController:
                 "windows_browser_spaces": HAS_BROWSER,
                 "search_web": True,
                 "search_configured": search_configured(),
+                "browser_use": True,
+                "ego_lite": False,
+                "ego_windows_ready": False,
             },
         }
 

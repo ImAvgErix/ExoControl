@@ -15,7 +15,7 @@ Hardened PC control plane. Not tied to Cursor, Grok, Claude, or Codex — those 
 
 Server: `python -m exo_control.slim_mcp_server`  
 Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"` (or `pip install -e .`).  
-Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`. `PERPLEXITY_API_KEY` unlocks `search`.
+Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`. `PERPLEXITY_API_KEY` unlocks `search`. `BROWSER_USE_API_KEY` unlocks `browser_use`.
 
 ## Rules
 
@@ -34,6 +34,20 @@ Lease-free Perplexity Search as Code. Fan out queries, then filter / dedupe / ra
 {"op": "search", "query": ["rust async runtimes", "tokio vs async-std"], "max": 5, "dedupe": true}
 {"op": "search_content", "query": "installation", "urls": ["https://docs.rs/tokio"]}
 ```
+
+## Browser Use Cloud
+
+Hosted web agent or a managed Chromium you drive with existing `browser_*` ops. Requires `BROWSER_USE_API_KEY`. Exo Control is Windows-only; this is the remote browser path.
+
+```json
+{"op": "browser_use", "task": "Find the top Show HN post"}
+{"op": "browser_use_start", "country": "us"}
+{"op": "browser_connect", "provider": "browser-use"}
+```
+
+## ego lite
+
+`{"op":"ego"}` only. ego lite has no Windows app. Use `browser_*` spaces on this machine.
 
 ## Minimal script
 

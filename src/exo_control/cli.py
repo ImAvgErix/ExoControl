@@ -129,10 +129,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         warnings = shadow_warnings(aether_file=str(exo_path))
         ident = identity()
         from exo_control.search_ops import configured as search_configured
+        from exo_control.browser_use_ops import configured as browser_use_configured
         _emit({
             "ok": len(warnings) == 0,
             **ident,
             "search_configured": search_configured(),
+            "browser_use_configured": browser_use_configured(),
+            "ego_windows_ready": False,
             "aether": str(aether_path),
             "exo_control": str(exo_path),
             "exo_root": str(exo_root()),

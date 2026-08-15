@@ -94,6 +94,7 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Browser** | CDP snapshot refs, DOM click/type, page `scrollBy` / `scrollIntoView` |
 | **OS** | Allowrooted files, HKCU registry, processes/services, fuzzy launch |
 | **Search** | Lease-free Perplexity `search` / `search_content` (`PERPLEXITY_API_KEY`) |
+| **Cloud browser** | Browser Use `browser_use` / `browser_use_start` (`BROWSER_USE_API_KEY`) |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 

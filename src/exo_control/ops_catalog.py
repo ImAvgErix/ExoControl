@@ -140,7 +140,20 @@ OPS: List[Dict[str, Any]] = [
      "purpose": "start/stop/restart service", "fields": ["name", "action", "confirm"]},
     {"op": "desktop", "aliases": [], "lease": "switch", "purpose": "Virtual desktop list/switch", "fields": ["action?"]},
     # Browser
-    {"op": "browser_connect", "aliases": [], "lease": True, "purpose": "Connect CDP browser", "fields": ["cdp_url?", "port?"]},
+    {"op": "browser_connect", "aliases": [], "lease": True,
+     "purpose": "Connect CDP browser (local loopback, or provider=browser-use cloud)",
+     "fields": ["cdp_url?", "endpoint?", "port?", "provider?"]},
+    {"op": "browser_use", "aliases": ["browser_use_task", "browser_use_run"], "lease": False,
+     "purpose": "Browser Use hosted agent run (task=… or poll run_id=…)",
+     "fields": ["task?", "run_id?", "wait?", "session_id?"]},
+    {"op": "browser_use_start", "aliases": ["browser_cloud"], "lease": False,
+     "purpose": "Start a Browser Use cloud Chromium; returns cdp_url",
+     "fields": ["country?", "profile_id?", "session_timeout?"]},
+    {"op": "browser_use_stop", "aliases": [], "lease": False,
+     "purpose": "Stop a Browser Use cloud browser session", "fields": ["id?"]},
+    {"op": "ego", "aliases": ["ego_status", "ego_lite"], "lease": False,
+     "purpose": "ego lite status (macOS app; Exo is Windows-only — use browser_* or browser_use)",
+     "fields": []},
     {"op": "browser_spaces", "aliases": [], "lease": True, "purpose": "List browser spaces", "fields": []},
     {"op": "browser_create_space", "aliases": [], "lease": True, "purpose": "New space", "fields": []},
     {"op": "browser_navigate", "aliases": [], "lease": True, "purpose": "Navigate", "fields": ["url", "space_id?"]},
@@ -190,6 +203,8 @@ HARNESS_RULES: List[str] = [
     "Always lease_release when done (or let TTL expire).",
     "Never invent UI state — use step results / observe / verify / seen.",
     "search / search_web is lease-free Perplexity retrieval (PERPLEXITY_API_KEY). Use browser_* to operate a page.",
+    "browser_use is Browser Use Cloud (BROWSER_USE_API_KEY): hosted task or cloud Chromium CDP.",
+    "Exo Control is Windows-only. ego lite has no Windows app — use browser_* spaces, not ego-browser.",
 ]
 
 MINIMAL_SCRIPT_EXAMPLE: List[Dict[str, Any]] = [
@@ -289,7 +304,9 @@ def mcp_instructions() -> str:
         "Scroll with aimed wheel (scroll / scroll_into_view / browser_scroll). Never Home/End. "
         "Hands attach a compact seen glance. Screenshots only when pixels matter (exo_screenshot). "
         "Call exo_help or step {\"op\":\"help\"} for ops (detail=true for the full catalog). "
-        "Web facts: {\"op\":\"search\",\"query\":[\"…\",\"…\"]} (PERPLEXITY_API_KEY). Page UI: browser_*. "
+        "Web facts: {\"op\":\"search\",\"query\":[\"…\",\"…\"]} (PERPLEXITY_API_KEY). "
+        "Cloud browser agent: {\"op\":\"browser_use\",\"task\":\"…\"} (BROWSER_USE_API_KEY). "
+        "Page UI: browser_*. Exo is Windows-only; ego lite has no Windows app. "
         "Example: [{\"op\":\"lease_acquire\",\"agent_id\":\"agent\",\"task\":\"demo\",\"ttl_sec\":120},"
         "{\"op\":\"launch\",\"app\":\"notepad\"},{\"op\":\"type\",\"text\":\"hi\"},{\"op\":\"lease_release\"}]. "
         "Hard rules: confirm=true for destructive OS ops; never kill anti-cheat; compact by default; "
