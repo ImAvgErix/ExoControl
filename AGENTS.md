@@ -52,4 +52,6 @@ Installed at `%LOCALAPPDATA%\ExoLauncher\app\ExoLauncher.exe`. Prefer CDP/DOM wh
 ]
 ```
 
+Web facts (lease-free): `{"op":"search","query":["…","…"]}` with `PERPLEXITY_API_KEY`. That is not UI find — use `type`/`click` for in-app search boxes. Page UI stays `browser_*`.
+
 Full catalog: [docs/HARNESS.md](docs/HARNESS.md) · capability bar: [docs/CAPABILITY.md](docs/CAPABILITY.md)

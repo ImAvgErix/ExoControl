@@ -42,7 +42,7 @@ exo-control doctor
 
 Optional browser CDP: `pip install "exo-control[browser]"` then `playwright install chromium`.
 
-Pin: `pip install "exo-control==2.1.0"` or `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"`.
+Pin: `pip install "exo-control==2.2.0"` or `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"`.
 
 State lives under `~/.exo/`. Legacy `~/.aether/` is migrated automatically.
 
@@ -93,6 +93,7 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Desktop** | UIA click/type/fill, aimed wheel + `scroll_into_view` + hover, live eyes, lease, multi-monitor |
 | **Browser** | CDP snapshot refs, DOM click/type, page `scrollBy` / `scrollIntoView` |
 | **OS** | Allowrooted files, HKCU registry, processes/services, fuzzy launch |
+| **Search** | Lease-free Perplexity `search` / `search_content` (`PERPLEXITY_API_KEY`) |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 

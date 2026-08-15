@@ -1,6 +1,6 @@
 [project]
 name = "exo-control"
-version = "2.1.0"
+version = "2.2.0"
 description = "Exo Control — realtime PC eyes and hands for any AI agent (MCP + CLI + Python). Compact. Leased. Honest."
 readme = "README.md"
 requires-python = ">=3.10"

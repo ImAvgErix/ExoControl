@@ -14,8 +14,8 @@ Hardened PC control plane. Not tied to Cursor, Grok, Claude, or Codex — those 
 3. **Python**: `from exo_control import ExoExecEngine`
 
 Server: `python -m exo_control.slim_mcp_server`  
-Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"` (or `pip install -e .`).  
-Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`.
+Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"` (or `pip install -e .`).  
+Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`. `PERPLEXITY_API_KEY` unlocks `search`.
 
 ## Rules
 
@@ -25,6 +25,15 @@ Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`.
 4. `{"op":"help"}` or `exo_help` if unsure of ops.
 5. `confirm=true` for destructive OS ops; never kill anti-cheat.
 6. Multi-monitor: pass `monitor` on focus/observe/shot; wrong display fails closed.
+
+## Web search (not UI find)
+
+Lease-free Perplexity Search as Code. Fan out queries, then filter / dedupe / rank in the result. Requires `PERPLEXITY_API_KEY`. Do **not** open a browser to look something up.
+
+```json
+{"op": "search", "query": ["rust async runtimes", "tokio vs async-std"], "max": 5, "dedupe": true}
+{"op": "search_content", "query": "installation", "urls": ["https://docs.rs/tokio"]}
+```
 
 ## Minimal script
 

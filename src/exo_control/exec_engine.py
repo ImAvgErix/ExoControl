@@ -496,6 +496,8 @@ class ExoExecEngine:
             "proc_list", "service_list", "service_status", "registry_read",
             "files_list", "files_read", "env_get", "env_list", "tasks_list",
             "startup_list", "observe_budget",
+            "search", "search_web", "pplx_search", "web_search",
+            "search_content", "search_snippets", "pplx_content",
         }:
             needs = False
         if not needs:
@@ -523,6 +525,8 @@ class ExoExecEngine:
                 "apps", "files_list", "files_read", "notify", "clipboard_image_save", "wait_window",
                 "observe_budget", "registry_read", "proc_list", "service_list", "service_status",
                 "env_get", "env_list", "tasks_list", "startup_list",
+                "search", "search_web", "pplx_search", "web_search",
+                "search_content", "search_snippets", "pplx_content",
             }:
                 return False
         if op == "proc":
@@ -790,6 +794,8 @@ class ExoExecEngine:
         compact_ops = {
             "observe", "compact_observe", "eyes", "eyes_read", "look", "glance",
             "browser_snapshot", "read_ui", "read",
+            "search", "search_web", "pplx_search", "web_search",
+            "search_content", "search_snippets", "pplx_content",
         }
         if op not in compact_ops:
             return value
@@ -1010,6 +1016,11 @@ class ExoExecEngine:
             if isinstance(st, dict):
                 st = {**st, **identity()}
                 st["ok"] = True
+                from exo_control import search_ops
+                caps = st.setdefault("capabilities", {})
+                if isinstance(caps, dict):
+                    caps["search_web"] = True
+                    caps["search_configured"] = search_ops.configured()
             return st
         if op in {"windows", "list_windows"}:
             mon = step.get("monitor")
@@ -1889,6 +1900,13 @@ class ExoExecEngine:
 
         if op in {"action_log", "log", "recent_actions"}:
             return self._action_log_tail(n=int(step.get("n") or step.get("limit") or step.get("last") or 20))
+
+        if op in {"search", "search_web", "pplx_search", "web_search"}:
+            from exo_control import search_ops
+            return search_ops.search_web(step)
+        if op in {"search_content", "search_snippets", "pplx_content"}:
+            from exo_control import search_ops
+            return search_ops.search_content(step)
 
         return {"ok": False, "error": f"Unknown operation: {op or '<empty>'}"}
 

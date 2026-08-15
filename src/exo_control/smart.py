@@ -2258,6 +2258,7 @@ class SmartController:
 
     def status(self) -> Dict[str, Any]:
         import sys
+        from exo_control.search_ops import configured as search_configured
         cua_ok = isinstance(self.backend, CuaBackend)
         eyes_running = bool(self._eyes and getattr(self._eyes, "_running", False))
         ocr_ready = False
@@ -2327,6 +2328,8 @@ class SmartController:
                 "hover": True,
                 "live_eyes": True,
                 "windows_browser_spaces": HAS_BROWSER,
+                "search_web": True,
+                "search_configured": search_configured(),
             },
         }
 

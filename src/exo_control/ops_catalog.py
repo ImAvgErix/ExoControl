@@ -69,6 +69,12 @@ OPS: List[Dict[str, Any]] = [
     {"op": "proc_list", "aliases": [], "lease": False, "purpose": "Process inventory", "fields": ["max?"]},
     {"op": "service_list", "aliases": [], "lease": False, "purpose": "Windows services", "fields": []},
     {"op": "service_status", "aliases": [], "lease": False, "purpose": "One service status", "fields": ["name"]},
+    {"op": "search", "aliases": ["search_web", "pplx_search", "web_search"], "lease": False,
+     "purpose": "Perplexity web search (lease-free; not UI find). query=str|list, then filter/dedupe/rank",
+     "fields": ["query", "max?", "domains?", "contains?", "dedupe?", "rank?", "country?", "recency?"]},
+    {"op": "search_content", "aliases": ["search_snippets", "pplx_content"], "lease": False,
+     "purpose": "Query-relevant snippets scoped to urls via Perplexity Search",
+     "fields": ["urls", "query?", "max?", "contains?"]},
     {"op": "env_get", "aliases": [], "lease": False, "purpose": "Env var", "fields": ["name"]},
     {"op": "env_list", "aliases": [], "lease": False, "purpose": "Env var names (values via env_get)", "fields": ["max?"]},
     {"op": "tasks_list", "aliases": [], "lease": False, "purpose": "Scheduled tasks (compact)", "fields": ["max?"]},
@@ -183,6 +189,7 @@ HARNESS_RULES: List[str] = [
     "lease_status never returns the token. force_release needs token, holder, or EXO_ALLOW_FORCE_RELEASE=1.",
     "Always lease_release when done (or let TTL expire).",
     "Never invent UI state — use step results / observe / verify / seen.",
+    "search / search_web is lease-free Perplexity retrieval (PERPLEXITY_API_KEY). Use browser_* to operate a page.",
 ]
 
 MINIMAL_SCRIPT_EXAMPLE: List[Dict[str, Any]] = [
@@ -282,6 +289,7 @@ def mcp_instructions() -> str:
         "Scroll with aimed wheel (scroll / scroll_into_view / browser_scroll). Never Home/End. "
         "Hands attach a compact seen glance. Screenshots only when pixels matter (exo_screenshot). "
         "Call exo_help or step {\"op\":\"help\"} for ops (detail=true for the full catalog). "
+        "Web facts: {\"op\":\"search\",\"query\":[\"…\",\"…\"]} (PERPLEXITY_API_KEY). Page UI: browser_*. "
         "Example: [{\"op\":\"lease_acquire\",\"agent_id\":\"agent\",\"task\":\"demo\",\"ttl_sec\":120},"
         "{\"op\":\"launch\",\"app\":\"notepad\"},{\"op\":\"type\",\"text\":\"hi\"},{\"op\":\"lease_release\"}]. "
         "Hard rules: confirm=true for destructive OS ops; never kill anti-cheat; compact by default; "

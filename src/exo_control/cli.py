@@ -128,9 +128,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         exo_path = Path(getattr(exo_control, "__file__", "") or "")
         warnings = shadow_warnings(aether_file=str(exo_path))
         ident = identity()
+        from exo_control.search_ops import configured as search_configured
         _emit({
             "ok": len(warnings) == 0,
             **ident,
+            "search_configured": search_configured(),
             "aether": str(aether_path),
             "exo_control": str(exo_path),
             "exo_root": str(exo_root()),
@@ -142,7 +144,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if aether_path and exo_path else False
             ),
             "warnings": warnings,
-            "hint": "pip install \"git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0\"",
+            "hint": "pip install \"git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0\"",
         })
         return 0 if not warnings else 1
 

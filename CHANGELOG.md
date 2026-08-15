@@ -3,6 +3,16 @@
 Version history for the **Exo Control** Python package.  
 This is a library (pip / wheel), not a Setup.exe. GitHub Release may include the wheel + sdist.
 
+## 2.2.0
+
+Perplexity Search as Code — lease-free web retrieval for any harness.
+
+- **`search` / `search_web`.** Fan-out one or more queries through the Perplexity Search API, then filter / dedupe / rank in the result. Not UI find — use `type`/`click` for in-app search boxes.
+- **`search_content` / `search_snippets`.** Query-relevant snippets scoped to `urls`.
+- Auth is `PERPLEXITY_API_KEY` (alias `EXO_PERPLEXITY_API_KEY`). Missing key fails closed with `AUTHENTICATION`.
+- Windows-safe HTTP contract. The compiled `pplx-srch-sdk` package is Linux/macOS + CPython 3.12 only and is not required.
+- Lease-free. Compact snippets by default (`verbose=true` for longer extracts).
+
 ## 2.1.0
 
 Human substitute — sit in the chair, use the mouse wheel, look at the screen.

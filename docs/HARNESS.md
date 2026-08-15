@@ -23,6 +23,7 @@ You control a Windows PC via Exo Control.
 - Call help (or MCP exo_help) before inventing ops.
 - confirm=true for destructive OS ops. Never kill anti-cheat.
 - Compact responses by default; do not dump raw HTML/trees unless verbose.
+- Web facts: search / search_web (PERPLEXITY_API_KEY). Page UI: browser_*.
 ```
 
 ## MCP tools (all hosts)
@@ -130,7 +131,7 @@ Or MCP: `exo_help` with optional `query`.
 ## Install once
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 exo-control doctor
 # optional CDP:
 pip install "exo-control[browser]"

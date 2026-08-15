@@ -56,6 +56,7 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Persistent UI memory across relaunch with invalidate-on-miss
 - [x] Clipboard image round-trip + real Windows notify toast
 - [x] Fuzzy launch → wait_window (PATH + alias + Start Menu)
+- [x] Perplexity Search as Code: lease-free `search` / `search_content` (HTTP; Windows-safe)
 
 ## Hard stops
 

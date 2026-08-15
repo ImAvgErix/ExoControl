@@ -170,6 +170,8 @@ def test_catalog_lease_sets_cover_cursor_and_notify():
     assert "screenshot" in req
     assert "lease_status" in free
     assert "help" in free
+    assert "search" in free
+    assert "search_content" in free
     assert not (req & free)
 
 
