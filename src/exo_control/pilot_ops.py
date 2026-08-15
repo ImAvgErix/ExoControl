@@ -27,6 +27,9 @@ META_OPS = frozenset({
     "heal", "ready", "readiness",
     "help", "ops", "capabilities", "catalog", "status", "stats",
     "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
+    "session_open", "seat", "take_seat",
+    "session_close", "leave_seat", "session_end",
+    "session_status", "seat_status",
     "last_error", "error", "last_fail",
     "action_log", "log", "recent_actions",
 })

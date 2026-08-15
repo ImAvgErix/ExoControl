@@ -1,6 +1,6 @@
 # Exo Control — live-in-the-PC model
 
-Exo Control is the shared pair of **eyes and hands** on a Windows machine. Agents do not own the desktop; they **lease** it, act, then release.
+Exo Control is the shared pair of **eyes and hands** on a Windows machine. Agents do not own the desktop; they **lease** it, act, then release. `session_open` is the remote-access shape of that lease: take the chair, drive the real cursor and keys, leave when done.
 
 ## Model
 
@@ -16,9 +16,14 @@ Exo Control is the shared pair of **eyes and hands** on a Windows machine. Agent
 - State: `%USERPROFILE%\.exo\state\desktop_lease.json`
 - `lease_acquire` → token (same `agent_id` renews)
 - `lease_status` reports holder/task/expiry — **never the token**
+- `session_open` / `seat` / `take_seat` — same lock, longer default TTL, eyes on, **never returns the token**. Holds across `execute()` calls until `session_close`
+- `session_status` — seated / holder / task / expiry — **never the token**
+- `pointer` / `mouse` / `keypress` / `drive` — raw SendInput HID (skip UIA). `drive` is a one-step burst: `[{"move":[x,y]},{"click":"left"},{"type":"hi"},{"key":"enter"}]`
 - Steal only if expired, or `force_release` with token / holder / `EXO_ALLOW_FORCE_RELEASE=1`
 - Mutating steps need lease in-script or on the step
 - Tests: `EXO_LOCK_DIR` / `EXO_STATE_DIR` (legacy `AETHER_*` still read)
+
+This is **not** an RDP/VNC pixel stream. The agent is in the chair: real cursor, real keys, live eyes.
 
 ## Surfaces
 

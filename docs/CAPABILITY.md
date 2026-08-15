@@ -79,6 +79,7 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Pilot (original): `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`
 - [x] Stock Windows natives (ctypes/netsh/PowerShell/COM) for volume, lock, wifi, power, recycle, TTS, dialog, dark_mode, idle, ports, Defender status, …
 - [x] Honest `ready` map: what works here vs Windows-native vs needs a key (`stt` stays stub)
+- [x] Live seat: `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID (not UIA, not RDP)
 
 ## Hard stops
 

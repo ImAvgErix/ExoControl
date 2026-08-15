@@ -22,6 +22,7 @@ from exo_control import registry_ops
 from exo_control import infra_ops
 from exo_control.ops_catalog import lease_free_ops, lease_required_ops
 from exo_control.pilot_ops import META_OPS, Pilot
+from exo_control.session_ops import LiveSeat
 from exo_control.policy import (
     allow_screenshot_on_fail_default,
     deny_browser_eval,
@@ -134,6 +135,7 @@ class ExoExecEngine:
         self._browser_use_session: Optional[str] = None
         self._pilot = Pilot()
         self._skill_depth = 0
+        self._seat = LiveSeat()
 
     def _get_browser(self):
         if self._browser is None:
@@ -549,6 +551,9 @@ class ExoExecEngine:
             "kill_switch", "arm_kill_switch", "disarm_kill_switch",
             "action_log", "log", "recent_actions",
             "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
+            "session_open", "seat", "take_seat",
+            "session_close", "leave_seat", "session_end",
+            "session_status", "seat_status",
             "list_cursors", "cursors",
         }:
             return False
@@ -906,13 +911,95 @@ class ExoExecEngine:
         return compact_payload(value, verbose=verbose)
 
     _SEEN_AFTER = frozenset({
-        "click", "smart_click", "type", "smart_type", "fill",
+            "click", "smart_click", "type", "smart_type", "fill",
         "scroll", "smart_scroll", "scroll_into_view", "into_view", "hover",
         "drag", "smart_drag", "hotkey", "smart_hotkey", "keys", "press",
+        "pointer", "mouse", "keypress", "drive",
         "browser_click", "browser_type", "browser_scroll", "browser_scroll_into_view",
         "browser_into_view", "browser_hover", "browser_press", "browser_fill",
         "browser_navigate",
     })
+
+    def _clear_seat(self) -> None:
+        self._seat.clear()
+
+    def _maybe_renew_seat(self) -> None:
+        if not self._seat.seated or not self._script_lease_token:
+            return
+        try:
+            desktop_lease.renew(self._script_lease_token, ttl_sec=self._seat.ttl_sec)
+        except Exception:
+            pass
+
+    def _live_seat(self, op: str, step: Dict[str, Any]) -> Dict[str, Any]:
+        from exo_control import session_ops
+
+        if op in {"session_open", "seat", "take_seat"}:
+            return self._session_open(step)
+        if op in {"session_close", "leave_seat", "session_end"}:
+            return self._session_close(step)
+        if op in {"session_status", "seat_status"}:
+            st = desktop_lease.status()
+            if not st.get("held"):
+                self._clear_seat()
+            return session_ops.public_status(st, seated=self._seat.seated)
+        self._maybe_renew_seat()
+        if op == "pointer":
+            return session_ops.pointer(step)
+        if op == "mouse":
+            return session_ops.mouse(step)
+        if op == "keypress":
+            return session_ops.keypress(step)
+        if op == "drive":
+            return session_ops.drive(step)
+        return {"ok": False, "error": f"unknown seat op: {op}"}
+
+    def _session_open(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        from exo_control import session_ops
+
+        agent = str(step.get("agent") or step.get("agent_id") or "").strip()
+        task = str(step.get("task") or "remote desk")
+        ttl = float(step.get("ttl_sec", step.get("ttl", session_ops.DEFAULT_TTL_SEC)))
+        out = desktop_lease.acquire(agent_id=agent, task=task, ttl_sec=ttl)
+        if not out.get("ok"):
+            return session_ops.public_error(out)
+        if out.get("token"):
+            self._script_lease_token = str(out["token"])
+        self._seat.sit(agent, task, float(out.get("ttl_sec") or ttl))
+        eyes: Dict[str, Any] = {}
+        self._maybe_start_live_eyes(step, eyes)
+        public = session_ops.public_status(desktop_lease.status(), seated=True)
+        if out.get("renewed"):
+            public["renewed"] = True
+        if out.get("ttl_sec") is not None:
+            public["ttl_sec"] = out.get("ttl_sec")
+        if eyes.get("eyes"):
+            public["eyes"] = eyes["eyes"]
+        return public
+
+    def _session_close(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        from exo_control import session_ops
+
+        token = self._lease_token(step) or self._script_lease_token or str(step.get("token") or "")
+        if not token:
+            self._clear_seat()
+            return {"ok": True, "seated": False, "held": False, "released": False, "reason": "no seat"}
+        out = desktop_lease.release(token=str(token))
+        if out.get("ok") and out.get("released"):
+            if self._script_lease_token == str(token):
+                self._script_lease_token = None
+            self._clear_seat()
+            self._maybe_stop_live_eyes(out)
+        public = session_ops.public_status(desktop_lease.status(), seated=self._seat.seated)
+        public["released"] = bool(out.get("released"))
+        if out.get("reason"):
+            public["reason"] = out["reason"]
+        if not out.get("ok"):
+            public["ok"] = False
+            public["error"] = out.get("error")
+            if out.get("holder"):
+                public["holder"] = out.get("holder")
+        return session_ops._no_secret(public)
 
     def _maybe_start_live_eyes(self, step: Dict[str, Any], out: Dict[str, Any]) -> None:
         if step.get("eyes") is False or not live_eyes_enabled():
@@ -1128,6 +1215,13 @@ class ExoExecEngine:
         if op in {"ready", "readiness"}:
             from exo_control import addon_ops
             return addon_ops.readiness()
+        if op in {
+            "session_open", "seat", "take_seat",
+            "session_close", "leave_seat", "session_end",
+            "session_status", "seat_status",
+            "pointer", "mouse", "keypress", "drive",
+        }:
+            return self._live_seat(op, step)
         if op == "status":
             st = ctrl.status() if hasattr(ctrl, "status") else {"ok": True}
             if isinstance(st, dict):
@@ -1920,6 +2014,7 @@ class ExoExecEngine:
             if out.get("ok") and out.get("released"):
                 if self._script_lease_token == token:
                     self._script_lease_token = None
+                self._clear_seat()
                 self._maybe_stop_live_eyes(out)
             return out
         if op == "lease_status":
@@ -2119,6 +2214,7 @@ class ExoExecEngine:
                     self._script_lease_token = None
                 elif not token:
                     self._script_lease_token = None
+                self._clear_seat()
                 self._maybe_stop_live_eyes(out)
             return out
 

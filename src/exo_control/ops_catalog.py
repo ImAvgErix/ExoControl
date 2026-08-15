@@ -62,6 +62,15 @@ OPS: List[Dict[str, Any]] = [
     {"op": "lease_force_release", "aliases": [], "lease": False,
      "purpose": "Clear lease by token, holder agent_id, or EXO_ALLOW_FORCE_RELEASE=1",
      "fields": ["token?", "agent_id?"]},
+    {"op": "session_open", "aliases": ["seat", "take_seat"], "lease": False,
+     "purpose": "Take the desk like remote access (lease + eyes). Holds across exec calls until session_close. Never returns the token",
+     "fields": ["agent_id", "task?", "ttl_sec?"]},
+    {"op": "session_close", "aliases": ["leave_seat", "session_end"], "lease": False,
+     "purpose": "Leave the live seat and release the desktop",
+     "fields": []},
+    {"op": "session_status", "aliases": ["seat_status"], "lease": False,
+     "purpose": "Who is seated (holder/task/expiry). Never the token",
+     "fields": []},
     {"op": "files_list", "aliases": [], "lease": False,
      "purpose": "List dir under allowroot", "fields": ["path", "max?", "confirm?"]},
     {"op": "files_read", "aliases": [], "lease": False, "purpose": "Read text file under allowroot", "fields": ["path"]},
@@ -539,12 +548,24 @@ OPS: List[Dict[str, Any]] = [
      "purpose": "Create a named virtual cursor", "fields": ["cursor_id?"]},
     {"op": "list_cursors", "aliases": ["cursors"], "lease": False,
      "purpose": "List virtual cursors", "fields": []},
+    {"op": "pointer", "aliases": [], "lease": True,
+     "purpose": "Move the real OS cursor (raw HID, not UIA). Omit x,y to read position",
+     "fields": ["x?", "y?", "human?"]},
+    {"op": "mouse", "aliases": [], "lease": True,
+     "purpose": "Raw mouse down/up/click at the real cursor (optional x,y)",
+     "fields": ["action?", "button?", "x?", "y?"]},
+    {"op": "keypress", "aliases": [], "lease": True,
+     "purpose": "Raw key tap/down/up (not the keys/press hotkey alias)",
+     "fields": ["key", "action?"]},
+    {"op": "drive", "aliases": [], "lease": True,
+     "purpose": "One-step HID burst: move/click/type/key/wheel/wait — remote-control feel",
+     "fields": ["events"]},
 ]
 
 HARNESS_RULES: List[str] = [
     "Works with ANY AI via MCP (stdio), CLI, or Python — not tied to one vendor.",
     "Script-first: prefer one batched exec with many steps over chatty single clicks.",
-    "Acquire lease_acquire before hands (click/type/launch/browser/files write).",
+    "Acquire lease_acquire before hands (click/type/launch/browser/files write), or session_open to hold the desk like remote access.",
     "You are a person in the chair: aim the pointer, wheel the document, glance after hands.",
     "Scroll with scroll / scroll_into_view / browser_scroll. Never Home/End (they jump the caret).",
     "Eyes first: observe/read/windows/verify; screenshots only when structure is insufficient.",
@@ -555,7 +576,8 @@ HARNESS_RULES: List[str] = [
     "confirm=true is an agent assertion, not a human prompt. Destructive OS ops still need it.",
     "Files outside EXO_FILE_ROOTS stay denied unless the operator sets EXO_ALLOW_OUTSIDE_ROOTS=1.",
     "lease_status never returns the token. force_release needs token, holder, or EXO_ALLOW_FORCE_RELEASE=1.",
-    "Always lease_release when done (or let TTL expire).",
+    "Always lease_release or session_close when done (or let TTL expire).",
+    "Live seat: session_open holds the chair across exec calls. pointer/mouse/keypress/drive are raw HID. session_status never returns the token.",
     "Never invent UI state — use step results / observe / verify / seen.",
     "search is lease-free web retrieval (provider=perplexity|tavily|exa|ddg|serper|brave). Use browser_* to operate a page.",
     "browser_use is Browser Use Cloud (BROWSER_USE_API_KEY): hosted task or cloud Chromium CDP.",
@@ -570,6 +592,7 @@ HARNESS_RULES: List[str] = [
     "Waves 3–5: Graph writes, CDP extras, ddg/wiki/weather/hn, more SaaS, zip/sqlite/tree, which/dns/lock_pc.",
     "Pilot (original): goal → hands → checkpoint → proof. changed diffs glances. undo reverses writes. skill_save/run is muscle memory. heal retries the last miss once.",
     "ready is the honest map (works here / Windows-native / needs a key). Windows desk ops use stock natives, not silent UNAVAILABLE.",
+    "session_open is handing someone the PC: they stay seated until session_close. Not an RDP/VNC pixel stream.",
     "Exo Control is Windows-only. ego lite has no Windows app — use browser_* spaces, not ego-browser.",
 ]
 
@@ -585,8 +608,10 @@ MINIMAL_SCRIPT_EXAMPLE: List[Dict[str, Any]] = [
 
 CORE_OPS = (
     "help", "status", "lease_acquire", "lease_release", "lease_status",
+    "session_open", "session_close", "session_status",
     "launch", "focus", "read", "observe", "click", "type", "scroll",
     "scroll_into_view", "hover", "verify", "wait", "screenshot",
+    "pointer", "drive",
 )
 
 
@@ -676,7 +701,9 @@ def mcp_instructions() -> str:
         "Exo Control — realtime Windows eyes/hands for ANY AI harness (MCP/CLI/Python). "
         "Use exo_exec with a JSON array of steps. "
         "Always start mutating work with {\"op\":\"lease_acquire\",\"agent_id\":\"…\",\"task\":\"…\"} "
-        "and end with lease_release. Prefer structure: focus → observe/read → click/type/scroll → verify. "
+        "or hold the desk with {\"op\":\"session_open\",\"agent_id\":\"…\",\"task\":\"…\"} until session_close. "
+        "Prefer structure: focus → observe/read → click/type/scroll → verify. "
+        "Raw remote hands: pointer / mouse / keypress / drive. "
         "Scroll with aimed wheel (scroll / scroll_into_view / browser_scroll). Never Home/End. "
         "Hands attach a compact seen glance. Screenshots only when pixels matter (exo_screenshot). "
         "Call exo_help or step {\"op\":\"help\"} for ops (detail=true for the full catalog). "

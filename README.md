@@ -105,12 +105,13 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Pilot** | Original layer: `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal` |
 | **Ready** | Honest `ready` map — what works here vs Windows-native vs needs a key |
 | **Windows natives** | Stock volume/lock/wifi/power/recycle/TTS/dialog/dark_mode/idle/ports/Defender (no extra pip) |
+| **Live seat** | `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 
 ## Safety
 
-- One desktop lease; `lease_status` never returns the token
+- One desktop lease; `lease_status` / `session_status` never return the token
 - Destructive OS ops need `confirm=true` (agent assertion, not a human prompt)
 - Files stay in `EXO_FILE_ROOTS` unless the operator sets `EXO_ALLOW_OUTSIDE_ROOTS=1`
 - Hard denies: anti-cheat, unnamed PID kill, critical services, non-loopback CDP

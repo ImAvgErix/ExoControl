@@ -351,6 +351,8 @@ def capabilities() -> Dict[str, Any]:
         "which": True,
         "lock_pc": True,
         "pilot": True,
+        "live_seat": True,
+        "session": True,
     }
 
 
@@ -365,6 +367,7 @@ def readiness() -> Dict[str, Any]:
         "help", "observe", "whoami", "hash", "disk", "git", "rag",
         "files_stat", "zip", "which", "now", "uuid_gen", "ip_addr", "dns",
         "pilot", "goal", "proof", "changed", "undo", "heal",
+        "session", "session_open", "session_status",
     ]
     windows_native = list(WINDOWS_NATIVE_OPS)
     on_windows = sys.platform == "win32"
