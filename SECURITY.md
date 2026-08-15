@@ -29,6 +29,34 @@ Exo Control runs as the logged-in Windows user. It is **not a sandbox**. Anyone 
 | `EXO_MCP_ALIASES` | off | Register `aether_*` MCP tools |
 | `EXO_SCREENSHOT_ON_FAIL` | off | Attach JPEG on failed steps |
 | `EXO_LEASE_MAX_TTL` | 1800 | Max lease seconds |
+| `PERPLEXITY_API_KEY` | unset | Enables lease-free `search` / `search_content` (queries leave the machine) |
+| `BROWSER_USE_API_KEY` | unset | Enables Browser Use Cloud (`browser_use` / cloud CDP). Traffic leaves the machine |
+| `FIRECRAWL_API_KEY` | unset | Enables `scrape` / `crawl` / `site_map` (URLs leave the machine) |
+| `BROWSERBASE_API_KEY` / `STAGEHAND_API_KEY` | unset | Enables Stagehand `browser_act` / `stagehand_extract` |
+| `SKYVERN_API_KEY` | unset | Enables `skyvern` vision tasks |
+| `AGENTQL_API_KEY` | unset | Enables `agentql` page queries |
+| `MEM0_API_KEY` | unset | Sends `memory_*` to Mem0 (else local JSONL under state dir) |
+| `COMPOSIO_API_KEY` / `MICROSOFT_GRAPH_TOKEN` | unset | Enables `composio` / `mail_list` / `cal_next` / `drive_get` / `todo` / `onenote` / `teams` / `mail_send` / Graph `xlsx` |
+| `JINA_API_KEY` | unset | Optional auth for `read_url` (Jina Reader works without it) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | unset | Enables `gh_pr` |
+| `STEEL_API_KEY` | unset | Enables `steel_start` / `steel_stop` (traffic leaves the machine) |
+| `TAVILY_API_KEY` | unset | Enables `tavily` search |
+| `EXA_API_KEY` | unset | Enables `exa` search |
+| `SLACK_BOT_TOKEN` / `SLACK_TOKEN` | unset | Enables `slack` |
+| `NOTION_API_KEY` | unset | Enables `notion` |
+| `LINEAR_API_KEY` | unset | Enables `linear` |
+| `JIRA_BASE` / `JIRA_EMAIL` / `JIRA_API_TOKEN` | unset | Enables `jira` |
+| `DISCORD_BOT_TOKEN` | unset | Enables `discord` |
+| `AIRTABLE_API_KEY` | unset | Enables `airtable` |
+| `TRELLO_KEY` / `TRELLO_TOKEN` | unset | Enables `trello` |
+| `ASANA_ACCESS_TOKEN` | unset | Enables `asana` |
+| `TELEGRAM_BOT_TOKEN` | unset | Enables `telegram` |
+| `SERPER_API_KEY` | unset | Enables `serper` |
+| `BRAVE_API_KEY` | unset | Enables `brave` |
+| `OMNIPARSER_URL` | unset | Local OmniParser HTTP for `omni` |
+| `EVERYTHING_URL` | `http://127.0.0.1` | Everything HTTP; miss falls back to allowroot walk |
+| `SCREENPIPE_URL` | `http://127.0.0.1:3030` | Screenpipe `recall` (loopback) |
+| `EXO_ALLOW_REMOTE_CDP` | off | Permit non-loopback CDP that is not Browser Use |
 
 ## Reporting
 
@@ -40,4 +68,4 @@ Desktop hands require an acquired lease. Agents share the machine; they do not o
 
 ## Confirm gates
 
-Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk."
+Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch, `mail_send` / `mail_reply` / `cal_add` / `todo_add` / `drive_put`, volume set, recycle empty, Slack/Discord/Telegram post, `pwsh`, WSL exec, docker run/rm, `print`, `dialog`, power sleep, lnk create, unzip, sqlite writes, `lock_pc`, cookie values) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk." No LSASS dump, UAC bypass, anti-cheat kill, or captcha farms.

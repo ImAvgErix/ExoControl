@@ -22,6 +22,8 @@ if IS_WIN:
     MOUSEEVENTF_VIRTUALDESK = 0x4000
     MOUSEEVENTF_WHEEL = 0x0800
     MOUSEEVENTF_HWHEEL = 0x1000
+    MOUSEEVENTF_MIDDLEDOWN = 0x0020
+    MOUSEEVENTF_MIDDLEUP = 0x0040
     WHEEL_DELTA = 120
     KEYEVENTF_KEYUP = 0x0002
     KEYEVENTF_UNICODE = 0x0004
@@ -167,6 +169,83 @@ if IS_WIN:
             ok = _send_wheel(nh, True) and ok
         return ok
 
+    _MOUSE_FLAGS = {
+        "left": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+        "right": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
+        "middle": (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+    }
+
+    _VK = {
+        "backspace": 0x08, "tab": 0x09, "enter": 0x0D, "return": 0x0D,
+        "shift": 0x10, "ctrl": 0x11, "control": 0x11, "alt": 0x12,
+        "pause": 0x13, "capslock": 0x14, "caps": 0x14, "esc": 0x1B, "escape": 0x1B,
+        "space": 0x20, "pageup": 0x21, "pagedown": 0x22, "end": 0x23, "home": 0x24,
+        "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
+        "insert": 0x2D, "delete": 0x2E,
+        "win": 0x5B, "lwin": 0x5B, "rwin": 0x5C, "apps": 0x5D,
+    }
+    for _i in range(1, 13):
+        _VK[f"f{_i}"] = 0x70 + _i - 1
+    for _i, _ch in enumerate("0123456789"):
+        _VK[_ch] = 0x30 + _i
+    for _i, _ch in enumerate("abcdefghijklmnopqrstuvwxyz"):
+        _VK[_ch] = 0x41 + _i
+
+    def mouse_button(button: str = "left", action: str = "click") -> bool:
+        pair = _MOUSE_FLAGS.get((button or "left").lower())
+        if not pair:
+            return False
+        down, up = pair
+        act = (action or "click").lower()
+        flags = []
+        if act in {"down", "click"}:
+            flags.append(down)
+        if act in {"up", "click"}:
+            flags.append(up)
+        if not flags:
+            return False
+        for flag in flags:
+            inp = INPUT()
+            inp.type = INPUT_MOUSE
+            inp.union.mi = MOUSEINPUT(0, 0, 0, flag, 0, None)
+            if user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def vk_code(name: str) -> Optional[int]:
+        key = str(name or "").strip().lower()
+        if not key:
+            return None
+        return _VK.get(key)
+
+    def _send_key(vk: int, up: bool) -> bool:
+        inp = INPUT()
+        inp.type = INPUT_KEYBOARD
+        inp.union.ki = KEYBDINPUT(int(vk), 0, KEYEVENTF_KEYUP if up else 0, 0, None)
+        return user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) == 1
+
+    def key_event(name: str, action: str = "tap") -> bool:
+        vk = vk_code(name)
+        if vk is None:
+            return False
+        act = (action or "tap").lower()
+        if act not in {"down", "up", "tap"}:
+            return False
+        if act in {"down", "tap"} and not _send_key(vk, False):
+            return False
+        if act in {"up", "tap"} and not _send_key(vk, True):
+            return False
+        return True
+
+    def wheel_here(notches: int = 0, h_notches: int = 0) -> bool:
+        ok = True
+        if notches:
+            ok = _send_wheel(int(notches), False) and ok
+        if h_notches:
+            ok = _send_wheel(int(h_notches), True) and ok
+        return ok
+
     def type_unicode(text: str) -> bool:
         ok = True
         for ch in text:
@@ -203,5 +282,9 @@ else:
     def move_human(x, y, duration=0.07): return False
     def wheel_abs(x, y, notches=0, h_notches=0, **kwargs): return False
     def type_unicode(text): return False
+    def mouse_button(button="left", action="click"): return False
+    def vk_code(name): return None
+    def key_event(name, action="tap"): return False
+    def wheel_here(notches=0, h_notches=0): return False
     def post_click_hwnd(hwnd, x, y): return False
     def window_rect(hwnd): return None

@@ -17,12 +17,18 @@ All three hit the **same** exec engine, lease, safety gates, and ops.
 ```
 You control a Windows PC via Exo Control.
 - Prefer one batched script over many single clicks.
-- Mutating work: lease_acquire → act → lease_release.
+- Mutating work: lease_acquire → act → lease_release. Or session_open to hold the desk like remote access, then session_close.
 - Eyes first: windows / observe / read / verify. Screenshots only if structure fails.
 - Scroll with scroll / scroll_into_view / browser_scroll. Never Home/End.
 - Call help (or MCP exo_help) before inventing ops.
 - confirm=true for destructive OS ops. Never kill anti-cheat.
 - Compact responses by default; do not dump raw HTML/trees unless verbose.
+- Web facts: search (provider=perplexity|tavily|exa|ddg|serper|brave). Page markdown: scrape (provider=firecrawl|jina). Cloud browser: browser_use (BROWSER_USE_API_KEY). Page UI: browser_*.
+- Docs on disk: files_convert (engine=markitdown|docling) / files_find / xlsx / rag / zip / sqlite. Memory: memory_add / memory_search. History: recall (Screenpipe). Graph: todo / onenote / teams / mail_send / cal_add. git / gh_pr. Wiki/weather/hn stay their own ops. SaaS: slack / notion / linear / jira.
+- Pilot (this is the product): goal / checkpoint / proof / changed / undo / skill_save / skill_run / heal. Not a vendor wrapper.
+- Call ready to see what actually works on this PC (Windows natives vs keys vs stubs).
+- Live seat: session_open / pointer / mouse / keypress / drive. Raw HID, not an RDP stream. session_status never returns the token.
+- Exo Control is Windows-only. ego lite has no Windows app.
 ```
 
 ## MCP tools (all hosts)
@@ -130,7 +136,7 @@ Or MCP: `exo_help` with optional `query`.
 ## Install once
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 exo-control doctor
 # optional CDP:
 pip install "exo-control[browser]"

@@ -1,8 +1,10 @@
 """
 Aether Browser Control Layer
 
-Cross-platform browser automation that works on Windows *today*
-(while waiting for ego lite Windows).
+Cross-platform browser automation that works on Windows *today*.
+
+ego lite (citrolabs/ego-lite) is macOS-only; these Playwright spaces are the
+Windows stand-in. Browser Use Cloud is an optional remote Chromium (CDP).
 
 Design goals (inspired by ego lite, but practical now):
 - Persistent profiles → reuse real logins / cookies when possible
@@ -73,6 +75,9 @@ class BrowserEngine:
         self._default_space_id: Optional[str] = None
         self._lock = asyncio.Lock()
         self._started = False
+        self._network: List[Dict[str, Any]] = []
+        self._downloads: List[Dict[str, Any]] = []
+        self._console: List[Dict[str, Any]] = []
 
     async def start(self) -> None:
         if self._started:
@@ -101,6 +106,7 @@ class BrowserEngine:
         sid = "default"
         self._spaces[sid] = Space(id=sid, name="default", context=self._browser, page=page)
         self._default_space_id = sid
+        self._hook_page(page)
 
     async def stop(self) -> None:
         if self._browser:
@@ -173,16 +179,17 @@ class BrowserEngine:
         page_title: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Attach to running Chromium/WebView2 debug port; bind Exo page by default."""
-        from exo_control.policy import is_loopback_endpoint
+        from exo_control.policy import is_allowed_cdp_endpoint, is_loopback_endpoint
 
         if not HAS_PLAYWRIGHT:
             return {"ok": False, "error": "playwright missing"}
-        if not is_loopback_endpoint(endpoint):
+        if not is_allowed_cdp_endpoint(endpoint):
             return {
                 "ok": False,
                 "error": "cdp_not_loopback",
                 "endpoint": endpoint,
-                "hint": "only 127.0.0.1 / localhost / ::1 CDP endpoints are allowed",
+                "loopback": is_loopback_endpoint(endpoint),
+                "hint": "loopback CDP, Browser Use (BROWSER_USE_API_KEY), or EXO_ALLOW_REMOTE_CDP=1",
             }
         if self._pw is None:
             self._pw = await async_playwright().start()
@@ -202,6 +209,7 @@ class BrowserEngine:
             sid = "cdp-default"
             self._spaces[sid] = Space(id=sid, name="cdp-default", context=self._browser, page=page)
             self._default_space_id = sid
+            self._hook_page(page)
             try:
                 bound_url = page.url
                 bound_title = await page.title()
@@ -265,11 +273,13 @@ class BrowserEngine:
             if url:
                 await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             self._spaces[sid] = Space(id=sid, name=name, context=ctx, page=page)
+            self._hook_page(page)
             return sid
         page = await self._browser.new_page()
         if url:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         self._spaces[sid] = Space(id=sid, name=name, context=self._browser, page=page)
+        self._hook_page(page)
         return sid
 
 
@@ -801,6 +811,252 @@ class BrowserEngine:
             results.append({"field": key, "ok": False, "error": "not found"})
         return {"ok": all(r.get("ok") for r in results), "results": results}
 
+    def _hook_page(self, page: Any) -> None:
+        if page is None or getattr(page, "_exo_hooks", False):
+            return
+        try:
+            page._exo_hooks = True
+        except Exception:
+            return
+
+        def on_request(req: Any) -> None:
+            try:
+                self._network.append({
+                    "url": getattr(req, "url", ""),
+                    "method": getattr(req, "method", ""),
+                    "resource": getattr(req, "resource_type", None),
+                })
+                if len(self._network) > 200:
+                    del self._network[:100]
+            except Exception:
+                pass
+
+        def on_response(resp: Any) -> None:
+            try:
+                url = getattr(resp, "url", "")
+                status = getattr(resp, "status", None)
+                for row in reversed(self._network):
+                    if row.get("url") == url and row.get("status") is None:
+                        row["status"] = status
+                        break
+                else:
+                    self._network.append({"url": url, "method": "", "status": status})
+            except Exception:
+                pass
+
+        def on_console(msg: Any) -> None:
+            try:
+                self._console.append({
+                    "type": getattr(msg, "type", "log"),
+                    "text": getattr(msg, "text", ""),
+                })
+                if len(self._console) > 120:
+                    del self._console[:60]
+            except Exception:
+                pass
+
+        def on_download(dl: Any) -> None:
+            try:
+                self._downloads.append({
+                    "url": getattr(dl, "url", ""),
+                    "suggested_filename": getattr(dl, "suggested_filename", ""),
+                })
+                if len(self._downloads) > 80:
+                    del self._downloads[:40]
+            except Exception:
+                pass
+
+        try:
+            page.on("request", on_request)
+            page.on("response", on_response)
+            page.on("download", on_download)
+            page.on("console", on_console)
+        except Exception:
+            pass
+
+    async def network_log(self, space_id: Optional[str] = None, max_items: int = 40) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        self._hook_page(space.page)
+        n = max(1, min(200, int(max_items or 40)))
+        return {"ok": True, "requests": list(self._network[-n:]), "count": min(len(self._network), n)}
+
+    async def downloads(self, space_id: Optional[str] = None, max_items: int = 20) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        self._hook_page(space.page)
+        n = max(1, min(80, int(max_items or 20)))
+        return {"ok": True, "downloads": list(self._downloads[-n:]), "count": min(len(self._downloads), n)}
+
+    async def pdf(self, path: str, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        data = await space.page.pdf(format="Letter")
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+        return {"ok": True, "path": str(out), "bytes": len(data), "space_id": space.id}
+
+    async def tabs(
+        self,
+        space_id: Optional[str] = None,
+        index: Optional[int] = None,
+        url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        await self.ensure_started()
+        rows: List[Dict[str, Any]] = []
+        items = list(self._spaces.items())
+        for i, (sid, space) in enumerate(items):
+            page_url = ""
+            try:
+                page_url = space.page.url if space.page else ""
+            except Exception:
+                page_url = ""
+            rows.append({
+                "index": i,
+                "space_id": sid,
+                "url": page_url,
+                "name": space.name,
+                "active": sid == (space_id or self._default_space_id),
+            })
+        active = None
+        if index is not None:
+            try:
+                idx = int(index)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "tabs index must be int", "tabs": rows}
+            if idx < 0 or idx >= len(items):
+                return {"ok": False, "error": f"no tab at index {idx}", "tabs": rows}
+            sid, _space = items[idx]
+            self._default_space_id = sid
+            active = rows[idx]
+            active["active"] = True
+        elif url:
+            needle = str(url).lower()
+            for row, (sid, _space) in zip(rows, items):
+                if needle in str(row.get("url") or "").lower():
+                    self._default_space_id = sid
+                    active = row
+                    row["active"] = True
+                    break
+            if active is None:
+                return {"ok": False, "error": f"no tab matching url={url!r}", "tabs": rows}
+        else:
+            for row in rows:
+                if row.get("active"):
+                    active = row
+                    break
+        return {"ok": True, "tabs": rows, "active": active}
+
+    async def back(self, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.go_back()
+        return {"ok": True, "url": space.page.url, "space_id": space.id}
+
+    async def forward(self, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.go_forward()
+        return {"ok": True, "url": space.page.url, "space_id": space.id}
+
+    async def reload(self, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.reload()
+        return {"ok": True, "reloaded": True, "url": space.page.url, "space_id": space.id}
+
+    async def select(self, selector: str, value: Any, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.select_option(selector, str(value))
+        return {"ok": True, "selector": selector, "value": value}
+
+    async def upload(self, selector: str, path: str, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        loc = space.page.locator(selector)
+        await loc.set_input_files(path)
+        return {"ok": True, "selector": selector, "path": path}
+
+    async def page_dialog(
+        self,
+        action: str = "accept",
+        text: Optional[str] = None,
+        space_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        act = str(action or "accept").lower()
+
+        def _on_dialog(dialog: Any) -> None:
+            try:
+                if act in {"dismiss", "cancel"}:
+                    dialog.dismiss()
+                else:
+                    dialog.accept(text or "")
+            except Exception:
+                pass
+
+        space.page.once("dialog", _on_dialog)
+        return {"ok": True, "action": act, "armed": True}
+
+    async def storage(self, kind: str = "local", space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        which = "sessionStorage" if str(kind).lower().startswith("session") else "localStorage"
+        items = await space.page.evaluate(
+            f"() => Object.fromEntries(Object.keys({which}).map(k => [k, {which}.getItem(k)]))"
+        )
+        return {"ok": True, "kind": "session" if which == "sessionStorage" else "local", "items": items or {}}
+
+    async def cookies(self, space_id: Optional[str] = None, include_values: bool = False) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        raw = []
+        try:
+            raw = await space.context.cookies()
+        except Exception:
+            try:
+                raw = await space.page.context.cookies()
+            except Exception:
+                raw = []
+        rows = []
+        for item in raw or []:
+            if not isinstance(item, dict):
+                continue
+            row = {
+                "name": item.get("name"),
+                "domain": item.get("domain"),
+                "path": item.get("path"),
+                "httpOnly": item.get("httpOnly"),
+                "secure": item.get("secure"),
+            }
+            if include_values:
+                row["value"] = item.get("value")
+            rows.append(row)
+        return {"ok": True, "cookies": rows[:80], "count": len(rows)}
+
+    async def console_log(self, space_id: Optional[str] = None, max_items: int = 40) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        self._hook_page(space.page)
+        n = max(1, min(120, int(max_items or 40)))
+        return {"ok": True, "messages": list(self._console[-n:]), "count": min(len(self._console), n)}
+
+    async def viewport(
+        self,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        space_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        if width and height:
+            await space.page.set_viewport_size({"width": int(width), "height": int(height)})
+        size = space.page.viewport_size or {"width": width, "height": height}
+        return {"ok": True, "width": size.get("width"), "height": size.get("height")}
+
     async def close_space(self, space_id: str) -> Dict[str, Any]:
         if space_id == "default":
             return {"ok": False, "error": "Cannot close default space"}
@@ -960,6 +1216,48 @@ class BrowserEngineSync:
 
     def close_space(self, space_id: str):
         return self._run(self._engine.close_space(space_id))
+
+    def network_log(self, space_id: Optional[str] = None, max_items: int = 40):
+        return self._run(self._engine.network_log(space_id, max_items))
+
+    def downloads(self, space_id: Optional[str] = None, max_items: int = 20):
+        return self._run(self._engine.downloads(space_id, max_items))
+
+    def pdf(self, path: str, space_id: Optional[str] = None):
+        return self._run(self._engine.pdf(path, space_id))
+
+    def tabs(self, space_id: Optional[str] = None, index: Optional[int] = None, url: Optional[str] = None):
+        return self._run(self._engine.tabs(space_id=space_id, index=index, url=url))
+
+    def back(self, space_id: Optional[str] = None):
+        return self._run(self._engine.back(space_id))
+
+    def forward(self, space_id: Optional[str] = None):
+        return self._run(self._engine.forward(space_id))
+
+    def reload(self, space_id: Optional[str] = None):
+        return self._run(self._engine.reload(space_id))
+
+    def select(self, selector: str, value: Any, space_id: Optional[str] = None):
+        return self._run(self._engine.select(selector, value, space_id))
+
+    def upload(self, selector: str, path: str, space_id: Optional[str] = None):
+        return self._run(self._engine.upload(selector, path, space_id))
+
+    def page_dialog(self, action: str = "accept", text: Optional[str] = None, space_id: Optional[str] = None):
+        return self._run(self._engine.page_dialog(action, text, space_id))
+
+    def storage(self, kind: str = "local", space_id: Optional[str] = None):
+        return self._run(self._engine.storage(kind, space_id))
+
+    def cookies(self, space_id: Optional[str] = None, include_values: bool = False):
+        return self._run(self._engine.cookies(space_id, include_values))
+
+    def console_log(self, space_id: Optional[str] = None, max_items: int = 40):
+        return self._run(self._engine.console_log(space_id, max_items))
+
+    def viewport(self, width: Optional[int] = None, height: Optional[int] = None, space_id: Optional[str] = None):
+        return self._run(self._engine.viewport(width, height, space_id))
 
     def stop(self):
         try:

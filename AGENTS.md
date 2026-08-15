@@ -12,12 +12,12 @@ If you do not know an op, run `{"op":"help"}` or `exo_help` first.
 
 ## Non-negotiable workflow
 
-1. **Lease** before hands: `lease_acquire` with your `agent_id` + short `task`
+1. **Lease** before hands: `lease_acquire` with your `agent_id` + short `task` — or `session_open` to hold the desk like remote access
 2. **Plan a script** — batch many steps in one `exo_exec` call
 3. **Focus** the window (`title` substring; optional `monitor`)
 4. **Observe/read** structure — do **not** screenshot first
-5. **Act** (click/type/fill/scroll/browser_*) then **verify**
-6. **lease_release** when done
+5. **Act** (click/type/fill/scroll/browser_* or raw `pointer`/`mouse`/`keypress`/`drive`) then **verify**
+6. **lease_release** or `session_close` when done
 
 You are a person at the desk. Aim the pointer. Roll the wheel on the document. Glance after you move.
 
@@ -45,11 +45,20 @@ Installed at `%LOCALAPPDATA%\ExoLauncher\app\ExoLauncher.exe`. Prefer CDP/DOM wh
 
 ```json
 [
-  {"op": "lease_acquire", "agent_id": "agent", "task": "open notepad", "ttl_sec": 120},
-  {"op": "launch", "app": "notepad"},
-  {"op": "type", "text": "ready"},
-  {"op": "lease_release"}
+  {"op": "session_open", "agent_id": "agent", "task": "remote desk"},
+  {"op": "drive", "events": [{"move": [400, 300]}, {"click": "left"}, {"type": "ready"}, {"key": "enter"}]},
+  {"op": "session_close"}
 ]
 ```
+
+`session_open` stays seated across later `exo_exec` calls until `session_close`. `session_status` never returns the token. One-shot scripts can still use `lease_acquire` → act → `lease_release`.
+
+Web facts (lease-free): `{"op":"search","query":["…","…"]}` with `PERPLEXITY_API_KEY`. That is not UI find — use `type`/`click` for in-app search boxes. Full page markdown: `{"op":"scrape","url":"…"}` (`FIRECRAWL_API_KEY`).
+
+Cloud web agent: `{"op":"browser_use","task":"…"}` with `BROWSER_USE_API_KEY`. Cloud Chromium: `browser_use_start` then `browser_connect` (`provider=browser-use` or the returned `cdp_url`). Local page UI stays `browser_*`. Stagehand `browser_act` / AgentQL `browser_query` / Skyvern `skyvern` are lease-free HTTP, not CDP hands.
+
+Docs on disk: `files_convert` / `files_find` / `xlsx` / `docling` / `rag` / `zip` / `sqlite` / `tree`. URL markdown: `read_url`. Facts: `memory_add` / `memory_search`. Screen history: `recall`. Mail/calendar/To Do: `mail_list` / `cal_next` / `todo` / `onenote` / `teams` (Graph). Writes (`mail_send` / `cal_add` / `todo_add` / `drive_put`) need `confirm=true`. Allowrooted `git`; `gh_pr` / `gh_issue` with `GITHUB_TOKEN`. Extra search: `tavily` / `exa` / `ddg` / `wiki` / `hn`. SaaS: `slack` / `notion` / `linear` / `jira` / `discord` (posts need confirm). Shells: `pwsh` / `wsl` / `docker` (exec/run need confirm).
+
+Exo Control is **Windows-only**. ego lite has no Windows app — do not call `ego-browser`. `{"op":"ego"}` reports that.
 
 Full catalog: [docs/HARNESS.md](docs/HARNESS.md) · capability bar: [docs/CAPABILITY.md](docs/CAPABILITY.md)

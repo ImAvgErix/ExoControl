@@ -42,7 +42,7 @@ exo-control doctor
 
 Optional browser CDP: `pip install "exo-control[browser]"` then `playwright install chromium`.
 
-Pin: `pip install "exo-control==2.1.0"` or `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"`.
+Pin: `pip install "exo-control==2.2.0"` or `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"`.
 
 State lives under `~/.exo/`. Legacy `~/.aether/` is migrated automatically.
 
@@ -93,12 +93,25 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Desktop** | UIA click/type/fill, aimed wheel + `scroll_into_view` + hover, live eyes, lease, multi-monitor |
 | **Browser** | CDP snapshot refs, DOM click/type, page `scrollBy` / `scrollIntoView` |
 | **OS** | Allowrooted files, HKCU registry, processes/services, fuzzy launch |
+| **Search** | Lease-free `search` (`provider=perplexity\|tavily\|exa\|ddg\|serper\|brave`) + `search_content` |
+| **Cloud browser** | Browser Use `browser_use` / `browser_use_start` (`BROWSER_USE_API_KEY`) |
+| **Web extract** | `scrape` (`provider=firecrawl\|jina`); `crawl` / `site_map`; Stagehand `browser_act`; Skyvern; AgentQL |
+| **Docs / find** | `files_convert` (`engine=markitdown\|docling`), `files_find` (Everything or walk) |
+| **Memory / history** | `memory_add` / `memory_search` (local or Mem0); `recall` (Screenpipe) |
+| **Mail / calendar** | `mail_list` / `cal_next` / `drive_get` / `todo` / `onenote` / `teams` / `mail_send` (Graph or Composio) |
+| **Desk extras** | `xlsx`, `git`, `gh_pr`, `volume`, `winget`, `recycle`, `eventlog`, `window_move`, `browser_network` / `pdf` / `tabs` |
+| **Wave 2** | `rag` / `steel_start` / `slack` / `notion` / `linear` / `pwsh` / `docker` / `hash` / `whoami` / `disk` |
+| **Waves 3–5** | Graph writes, CDP extras, `wiki`/`weather`/`hn`, Jira/Discord/Airtable, `zip`/`sqlite`/`tree`, `which`/`dns`/`lock_pc` |
+| **Pilot** | Original layer: `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal` |
+| **Ready** | Honest `ready` map — what works here vs Windows-native vs needs a key |
+| **Windows natives** | Stock volume/lock/wifi/power/recycle/TTS/dialog/dark_mode/idle/ports/Defender (no extra pip) |
+| **Live seat** | `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 
 ## Safety
 
-- One desktop lease; `lease_status` never returns the token
+- One desktop lease; `lease_status` / `session_status` never return the token
 - Destructive OS ops need `confirm=true` (agent assertion, not a human prompt)
 - Files stay in `EXO_FILE_ROOTS` unless the operator sets `EXO_ALLOW_OUTSIDE_ROOTS=1`
 - Hard denies: anti-cheat, unnamed PID kill, critical services, non-loopback CDP

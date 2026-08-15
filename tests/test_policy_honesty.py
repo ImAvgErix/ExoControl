@@ -106,9 +106,15 @@ def test_env_get_redacts_secrets(monkeypatch):
 
 
 def test_cdp_loopback_and_sanitize():
+    from aether.policy import is_allowed_cdp_endpoint, is_browser_use_cdp
+
     assert is_loopback_endpoint("http://127.0.0.1:9222")
     assert is_loopback_endpoint("http://localhost:9229")
     assert not is_loopback_endpoint("http://10.0.0.8:9222")
+    assert is_browser_use_cdp("wss://connect.browser-use.com/cdp/abc")
+    assert not is_browser_use_cdp("wss://evil.example/cdp")
+    assert is_allowed_cdp_endpoint("http://127.0.0.1:9222")
+    assert not is_allowed_cdp_endpoint("wss://connect.browser-use.com/cdp/abc")
     clean = sanitize_cdp_endpoints([
         {
             "endpoint": "http://127.0.0.1:9222",
@@ -170,6 +176,11 @@ def test_catalog_lease_sets_cover_cursor_and_notify():
     assert "screenshot" in req
     assert "lease_status" in free
     assert "help" in free
+    assert "search" in free
+    assert "search_content" in free
+    assert "browser_use" in free
+    assert "ego" in free
+    assert "browser_connect" in req
     assert not (req & free)
 
 

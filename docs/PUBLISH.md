@@ -3,17 +3,17 @@
 ## GitHub (wheel / sdist)
 
 ```bash
-git tag -a v2.1.0 -m "Exo Control v2.1.0"
-git push origin v2.1.0
-gh release create v2.1.0 --title "v2.1.0" --generate-notes
+git tag -a v2.2.0 -m "Exo Control v2.2.0"
+git push origin v2.2.0
+gh release create v2.2.0 --title "v2.2.0" --generate-notes
 python -m build
-gh release upload v2.1.0 dist/exo_control-2.1.0*
+gh release upload v2.2.0 dist/exo_control-2.2.0*
 ```
 
 Install from tag until PyPI is live:
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.1.0"
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 ```
 
 ## PyPI trusted publisher

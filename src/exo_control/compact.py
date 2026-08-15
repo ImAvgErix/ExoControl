@@ -17,10 +17,11 @@ _STRIP_KEYS = frozenset({
     "html",
 })
 
-_TEXT_KEYS = frozenset({"text_sample", "text", "body"})
+_TEXT_KEYS = frozenset({"text_sample", "text", "body", "snippet", "output"})
 _LIST_KEYS = frozenset({
     "elements", "refs", "a11y", "a11y_labels", "ocr", "entries",
     "values", "procs", "services", "tasks", "items",
+    "results", "hits", "snippets", "queries",
 })
 
 
@@ -135,7 +136,7 @@ def compact_payload(
                     shaped[f"_{key}_capped"] = True
             chars = _json_chars(shaped)
         if chars > max_chars:
-            for key in ("a11y", "elements", "ocr", "refs", "entries"):
+            for key in ("a11y", "elements", "ocr", "refs", "entries", "results"):
                 if key in shaped and chars > max_chars:
                     shaped.pop(key, None)
                     chars = _json_chars(shaped)

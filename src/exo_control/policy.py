@@ -142,6 +142,45 @@ def is_loopback_endpoint(endpoint: str) -> bool:
     return host in {"127.0.0.1", "localhost", "::1"}
 
 
+def allow_remote_cdp() -> bool:
+    """Operator opt-in for arbitrary non-loopback CDP (not just Browser Use)."""
+    return env_flag("EXO_ALLOW_REMOTE_CDP", "AETHER_ALLOW_REMOTE_CDP", default=False)
+
+
+def browser_use_api_key() -> str:
+    for name in ("BROWSER_USE_API_KEY", "EXO_BROWSER_USE_API_KEY"):
+        raw = (os.environ.get(name) or "").strip()
+        if raw:
+            return raw
+    return ""
+
+
+def browser_use_configured() -> bool:
+    return bool(browser_use_api_key())
+
+
+def is_browser_use_cdp(endpoint: str) -> bool:
+    raw = (endpoint or "").strip()
+    if not raw:
+        return False
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        host = (urlparse(raw).hostname or "").strip().lower()
+    except Exception:
+        return False
+    return host == "browser-use.com" or host.endswith(".browser-use.com")
+
+
+def is_allowed_cdp_endpoint(endpoint: str) -> bool:
+    """Loopback always. Browser Use CDP when the operator set an API key. Else EXO_ALLOW_REMOTE_CDP=1."""
+    if is_loopback_endpoint(endpoint):
+        return True
+    if allow_remote_cdp():
+        return True
+    return is_browser_use_cdp(endpoint) and browser_use_configured()
+
+
 def is_dangerous_launch(command: str) -> bool:
     from pathlib import Path
 
@@ -196,6 +235,7 @@ def identity() -> Dict[str, Any]:
             "deny_browser_eval": deny_browser_eval(),
             "mcp_aliases": allow_mcp_aliases(),
             "live_eyes": live_eyes_enabled(),
+            "allow_remote_cdp": allow_remote_cdp(),
             "max_lease_ttl_sec": max_lease_ttl_sec(),
         },
     }

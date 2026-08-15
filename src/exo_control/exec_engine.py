@@ -21,6 +21,8 @@ from exo_control import files_ops
 from exo_control import registry_ops
 from exo_control import infra_ops
 from exo_control.ops_catalog import lease_free_ops, lease_required_ops
+from exo_control.pilot_ops import META_OPS, Pilot
+from exo_control.session_ops import LiveSeat
 from exo_control.policy import (
     allow_screenshot_on_fail_default,
     deny_browser_eval,
@@ -130,6 +132,10 @@ class ExoExecEngine:
         self._last_error: Optional[Dict[str, Any]] = None
         self._script_launched_pids: List[int] = []
         self._eyes_started_by_lease = False
+        self._browser_use_session: Optional[str] = None
+        self._pilot = Pilot()
+        self._skill_depth = 0
+        self._seat = LiveSeat()
 
     def _get_browser(self):
         if self._browser is None:
@@ -300,6 +306,19 @@ class ExoExecEngine:
         tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         op = str(step.get("op") or "").strip().lower().replace("-", "_")
+        work = dict(step)
+        if op == "clipboard_set":
+            try:
+                prev = self.ctrl.clipboard_get()
+                if isinstance(prev, dict):
+                    work["_prev_clipboard"] = prev.get("text") or prev.get("value")
+            except Exception:
+                pass
+        snap = (
+            self._pilot.prepare_undo(op, work)
+            if op in {"files_write", "files_delete", "clipboard_set"}
+            else None
+        )
         step_started = time.perf_counter()
         try:
             # Bound UIA waits only. Playwright browser_* must NOT run under
@@ -309,10 +328,10 @@ class ExoExecEngine:
                 "observe", "compact_observe", "read_ui", "read",
             }:
                 value = self._run_step_bounded(
-                    op, step, timeout_s=float(step.get("timeout", 14.0))
+                    op, work, timeout_s=float(work.get("timeout", 14.0))
                 )
             else:
-                value = self._run_step(op, step)
+                value = self._run_step(op, work)
         except Exception as exc:
             value = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         value = _normalize_result(op, value)
@@ -324,6 +343,26 @@ class ExoExecEngine:
             except Exception:
                 pass
         ok = _step_ok(value)
+        if ok:
+            if snap:
+                self._pilot.push_undo(snap)
+            self._pilot.remember_step(work, op)
+            if op in {
+                "observe", "compact_observe", "read", "read_ui",
+                "eyes", "eyes_read", "look", "glance",
+            }:
+                self._pilot.note_glance(value)
+            elif self._pilot.goal and op not in META_OPS and self._is_mutating_op(op, work):
+                try:
+                    obs = self.ctrl.compact_observe()
+                    if isinstance(obs, dict) and obs.get("ok") is not False:
+                        self._pilot.note_glance(obs)
+                        if isinstance(value, dict) and len(self._pilot.glances) >= 2:
+                            value = {**value, "changed": self._pilot.changed()}
+                except Exception:
+                    pass
+        else:
+            self._pilot.note_failure(work, op)
         if not ok:
             want_shot = step.get("screenshot_on_fail")
             if want_shot is None:
@@ -378,6 +417,8 @@ class ExoExecEngine:
         released_this_script = False
         self._desktop_refs = {}
         self._script_launched_pids = []
+        if self._skill_depth == 0:
+            self._pilot.reset_script()
         # Keep held lease across execute() calls unless this script acquired and
         # failed mid-way (auto_release_lease), so agents are not stuck.
         for index, step in enumerate(steps):
@@ -458,7 +499,7 @@ class ExoExecEngine:
             (not r.get("ok")) and r.get("phase") != "finally" and not r.get("auto")
             for r in results
         )
-        return {
+        out: Dict[str, Any] = {
             "ok": main_ok,
             "elapsed_ms": round((time.perf_counter() - started) * 1000),
             "completed": main_count,
@@ -469,6 +510,9 @@ class ExoExecEngine:
             "last_error": self._last_error,
             "steps": results,
         }
+        if self._pilot.goal:
+            out["pilot"] = self._pilot.summary()
+        return out
 
     def _lease_token(self, step: Dict[str, Any]) -> Optional[str]:
         token = (
@@ -491,12 +535,8 @@ class ExoExecEngine:
         if op == "desktop":
             action = str(step.get("action") or "list").lower()
             needs = action in {"switch", "goto", "set"}
-        # Read-only aliases must never require a lease even if mis-listed.
-        if op in {
-            "proc_list", "service_list", "service_status", "registry_read",
-            "files_list", "files_read", "env_get", "env_list", "tasks_list",
-            "startup_list", "observe_budget",
-        }:
+        # Catalog lease-free wins — including browser_act / browser_query HTTP aliases.
+        if op in LEASE_FREE_OPS:
             needs = False
         if not needs:
             return None
@@ -511,20 +551,14 @@ class ExoExecEngine:
             "kill_switch", "arm_kill_switch", "disarm_kill_switch",
             "action_log", "log", "recent_actions",
             "lease_acquire", "lease_renew", "lease_release", "lease_status", "lease_force_release",
+            "session_open", "seat", "take_seat",
+            "session_close", "leave_seat", "session_end",
+            "session_status", "seat_status",
             "list_cursors", "cursors",
         }:
             return False
-        if op in LEASE_FREE_OPS and op != "notify":
-            # read-only / wait / verify — not injects
-            if op.startswith("wait") or op.startswith("verify") or op in {
-                "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
-                "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
-                "eyes", "eyes_start", "eyes_stop", "eyes_read", "look", "glance",
-                "apps", "files_list", "files_read", "notify", "clipboard_image_save", "wait_window",
-                "observe_budget", "registry_read", "proc_list", "service_list", "service_status",
-                "env_get", "env_list", "tasks_list", "startup_list",
-            }:
-                return False
+        if op in LEASE_FREE_OPS:
+            return False
         if op == "proc":
             action = str(step.get("action") or step.get("mode") or "list").lower()
             return action in {"kill", "stop", "terminate"}
@@ -635,6 +669,67 @@ class ExoExecEngine:
         if not items:
             items = list(self._action_log[-n:])
         return {"ok": True, "count": len(items), "entries": items, "actions": items}
+
+    def _skill_run(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        if self._skill_depth >= 2:
+            return {"ok": False, "error": "skill_run nested too deep", "code": "SKILL_DEPTH"}
+        loaded = self._pilot.skill_load(step)
+        if not loaded.get("ok"):
+            return loaded
+        self._skill_depth += 1
+        try:
+            inner = self.execute(
+                loaded["steps"],
+                stop_on_failure=True,
+                auto_release_lease=False,
+            )
+        finally:
+            self._skill_depth -= 1
+        err = None
+        if not inner.get("ok"):
+            last = inner.get("last_error") or {}
+            err = last.get("error") if isinstance(last, dict) else None
+        return {
+            "ok": bool(inner.get("ok")),
+            "name": loaded.get("name"),
+            "replayed": loaded.get("count"),
+            "completed": inner.get("completed"),
+            "error": err,
+        }
+
+    def _heal(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        if self._pilot.heal_used:
+            return {"ok": False, "error": "already healed this error", "code": "HEAL_USED"}
+        failed = self._pilot.last_failed_step
+        if not failed:
+            return {"ok": False, "error": "nothing to heal", "code": "NOTHING_TO_HEAL"}
+        self._pilot.heal_used = True
+        glance = None
+        try:
+            from exo_control.pilot_ops import glance_from
+            obs = self.ctrl.compact_observe()
+            if isinstance(obs, dict) and obs.get("ok") is not False:
+                self._pilot.note_glance(obs)
+                glance = glance_from(obs)
+        except Exception:
+            glance = None
+        retry_op = str(failed.get("op") or "")
+        retried = _normalize_result(retry_op, self._run_step(retry_op, failed))
+        if _step_ok(retried):
+            self._last_error = None
+            snap = self._pilot.prepare_undo(retry_op, failed)
+            if snap:
+                self._pilot.push_undo(snap)
+            self._pilot.remember_step(failed, retry_op)
+            return {"ok": True, "retried": retry_op, "result": retried, "glance": glance}
+        return {
+            "ok": False,
+            "retried": retry_op,
+            "error": retried.get("error") if isinstance(retried, dict) else "heal retry failed",
+            "code": retried.get("code") if isinstance(retried, dict) else "HEAL_FAILED",
+            "result": retried,
+            "glance": glance,
+        }
 
 
     def _require_focus(self, op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -790,6 +885,12 @@ class ExoExecEngine:
         compact_ops = {
             "observe", "compact_observe", "eyes", "eyes_read", "look", "glance",
             "browser_snapshot", "read_ui", "read",
+            "search", "search_web", "pplx_search", "web_search",
+            "search_content", "search_snippets", "pplx_content",
+            "browser_use", "browser_use_task", "browser_use_run",
+            "scrape", "firecrawl", "crawl", "site_map",
+            "files_convert", "read_doc", "agentql", "browser_query",
+            "memory_search", "recall", "screen_search",
         }
         if op not in compact_ops:
             return value
@@ -810,13 +911,95 @@ class ExoExecEngine:
         return compact_payload(value, verbose=verbose)
 
     _SEEN_AFTER = frozenset({
-        "click", "smart_click", "type", "smart_type", "fill",
+            "click", "smart_click", "type", "smart_type", "fill",
         "scroll", "smart_scroll", "scroll_into_view", "into_view", "hover",
         "drag", "smart_drag", "hotkey", "smart_hotkey", "keys", "press",
+        "pointer", "mouse", "keypress", "drive",
         "browser_click", "browser_type", "browser_scroll", "browser_scroll_into_view",
         "browser_into_view", "browser_hover", "browser_press", "browser_fill",
         "browser_navigate",
     })
+
+    def _clear_seat(self) -> None:
+        self._seat.clear()
+
+    def _maybe_renew_seat(self) -> None:
+        if not self._seat.seated or not self._script_lease_token:
+            return
+        try:
+            desktop_lease.renew(self._script_lease_token, ttl_sec=self._seat.ttl_sec)
+        except Exception:
+            pass
+
+    def _live_seat(self, op: str, step: Dict[str, Any]) -> Dict[str, Any]:
+        from exo_control import session_ops
+
+        if op in {"session_open", "seat", "take_seat"}:
+            return self._session_open(step)
+        if op in {"session_close", "leave_seat", "session_end"}:
+            return self._session_close(step)
+        if op in {"session_status", "seat_status"}:
+            st = desktop_lease.status()
+            if not st.get("held"):
+                self._clear_seat()
+            return session_ops.public_status(st, seated=self._seat.seated)
+        self._maybe_renew_seat()
+        if op == "pointer":
+            return session_ops.pointer(step)
+        if op == "mouse":
+            return session_ops.mouse(step)
+        if op == "keypress":
+            return session_ops.keypress(step)
+        if op == "drive":
+            return session_ops.drive(step)
+        return {"ok": False, "error": f"unknown seat op: {op}"}
+
+    def _session_open(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        from exo_control import session_ops
+
+        agent = str(step.get("agent") or step.get("agent_id") or "").strip()
+        task = str(step.get("task") or "remote desk")
+        ttl = float(step.get("ttl_sec", step.get("ttl", session_ops.DEFAULT_TTL_SEC)))
+        out = desktop_lease.acquire(agent_id=agent, task=task, ttl_sec=ttl)
+        if not out.get("ok"):
+            return session_ops.public_error(out)
+        if out.get("token"):
+            self._script_lease_token = str(out["token"])
+        self._seat.sit(agent, task, float(out.get("ttl_sec") or ttl))
+        eyes: Dict[str, Any] = {}
+        self._maybe_start_live_eyes(step, eyes)
+        public = session_ops.public_status(desktop_lease.status(), seated=True)
+        if out.get("renewed"):
+            public["renewed"] = True
+        if out.get("ttl_sec") is not None:
+            public["ttl_sec"] = out.get("ttl_sec")
+        if eyes.get("eyes"):
+            public["eyes"] = eyes["eyes"]
+        return public
+
+    def _session_close(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        from exo_control import session_ops
+
+        token = self._lease_token(step) or self._script_lease_token or str(step.get("token") or "")
+        if not token:
+            self._clear_seat()
+            return {"ok": True, "seated": False, "held": False, "released": False, "reason": "no seat"}
+        out = desktop_lease.release(token=str(token))
+        if out.get("ok") and out.get("released"):
+            if self._script_lease_token == str(token):
+                self._script_lease_token = None
+            self._clear_seat()
+            self._maybe_stop_live_eyes(out)
+        public = session_ops.public_status(desktop_lease.status(), seated=self._seat.seated)
+        public["released"] = bool(out.get("released"))
+        if out.get("reason"):
+            public["reason"] = out["reason"]
+        if not out.get("ok"):
+            public["ok"] = False
+            public["error"] = out.get("error")
+            if out.get("holder"):
+                public["holder"] = out.get("holder")
+        return session_ops._no_secret(public)
 
     def _maybe_start_live_eyes(self, step: Dict[str, Any], out: Dict[str, Any]) -> None:
         if step.get("eyes") is False or not live_eyes_enabled():
@@ -1005,11 +1188,60 @@ class ExoExecEngine:
             return ctrl.create_cursor(str(step.get("cursor_id") or step.get("id") or step.get("cursor") or "main"))
         if op in {"list_cursors", "cursors"}:
             return {"ok": True, "cursors": ctrl.list_cursors()}
+        if op in {"goal", "intent"}:
+            return self._pilot.set_goal(step)
+        if op == "checkpoint":
+            return self._pilot.checkpoint(step)
+        if op == "proof":
+            return self._pilot.proof(last_error=self._last_error)
+        if op in {"changed", "what_changed"}:
+            return self._pilot.changed()
+        if op == "undo":
+            out = self._pilot.undo()
+            if out.get("ok") and out.get("restore") and out.get("undid") == "clipboard_set":
+                set_out = ctrl.clipboard_set(str(out.get("text") or ""))
+                if isinstance(set_out, dict):
+                    return {**set_out, "undid": "clipboard_set"}
+                return out
+            return out
+        if op == "skill_save":
+            return self._pilot.skill_save(step)
+        if op == "skill_list":
+            return self._pilot.skill_list()
+        if op in {"skill_run", "replay"}:
+            return self._skill_run(step)
+        if op == "heal":
+            return self._heal(step)
+        if op in {"ready", "readiness"}:
+            from exo_control import addon_ops
+            return addon_ops.readiness()
+        if op in {
+            "session_open", "seat", "take_seat",
+            "session_close", "leave_seat", "session_end",
+            "session_status", "seat_status",
+            "pointer", "mouse", "keypress", "drive",
+        }:
+            return self._live_seat(op, step)
         if op == "status":
             st = ctrl.status() if hasattr(ctrl, "status") else {"ok": True}
             if isinstance(st, dict):
                 st = {**st, **identity()}
                 st["ok"] = True
+                from exo_control import search_ops
+                caps = st.setdefault("capabilities", {})
+                if isinstance(caps, dict):
+                    caps["search_web"] = True
+                    caps["search_configured"] = search_ops.configured()
+                    from exo_control import addon_ops, browser_use_ops, ego_ops
+                    caps["browser_use"] = True
+                    caps["browser_use_configured"] = browser_use_ops.configured()
+                    caps["ego_lite"] = False
+                    caps["ego_windows_ready"] = False
+                    ego = ego_ops.detect()
+                    caps["ego_available"] = bool(ego.get("available"))
+                    caps.update(addon_ops.capabilities())
+                    caps["pilot"] = True
+                    caps["readiness"] = addon_ops.readiness()
             return st
         if op in {"windows", "list_windows"}:
             mon = step.get("monitor")
@@ -1243,9 +1475,33 @@ class ExoExecEngine:
         if op == "stats":
             return ctrl.stats(reset=bool(step.get("reset", False)))
 
+        if op in {"browser_use", "browser_use_task", "browser_use_run"}:
+            from exo_control import browser_use_ops
+            return browser_use_ops.run_task(step)
+        if op in {"browser_use_start", "browser_cloud"}:
+            from exo_control import browser_use_ops
+            out = browser_use_ops.start_browser(step)
+            if out.get("ok") and out.get("id"):
+                self._browser_use_session = str(out["id"])
+            return out
+        if op == "browser_use_stop":
+            from exo_control import browser_use_ops
+            out = browser_use_ops.stop_browser(step, default_id=self._browser_use_session)
+            if out.get("ok"):
+                self._browser_use_session = None
+            return out
+        if op in {"ego", "ego_status", "ego_lite"}:
+            from exo_control import ego_ops
+            return ego_ops.detect()
+
+        from exo_control import addon_ops
+        addon = addon_ops.dispatch(op, step)
+        if addon is not None:
+            return addon
+
         browser = self._get_browser() if op.startswith("browser_") else None
         if op == "browser_connect":
-            return browser.connect_cdp(step.get("endpoint", "http://127.0.0.1:9222"), page_url=step.get("page_url") or step.get("url_contains"), page_title=step.get("page_title") or step.get("title"))
+            return self._browser_connect(browser, step)
         if op == "browser_spaces":
             return browser.list_spaces()
         if op == "browser_create_space":
@@ -1341,6 +1597,92 @@ class ExoExecEngine:
             return browser.evaluate(str(step.get("js", "")), step.get("space_id"))
         if op == "browser_close_space":
             return browser.close_space(str(step.get("space_id", "")))
+        if op in {"browser_network", "browser_har"}:
+            if hasattr(browser, "network_log"):
+                return browser.network_log(
+                    step.get("space_id"),
+                    int(step.get("max") or step.get("limit") or 40),
+                )
+            return {"ok": False, "error": "browser_network not available"}
+        if op == "browser_downloads":
+            if hasattr(browser, "downloads"):
+                return browser.downloads(
+                    step.get("space_id"),
+                    int(step.get("max") or step.get("limit") or 20),
+                )
+            return {"ok": False, "error": "browser_downloads not available"}
+        if op in {"browser_pdf", "browser_print"}:
+            path = str(step.get("path") or step.get("out") or "").strip()
+            if not path:
+                return {"ok": False, "error": "browser_pdf requires path"}
+            ok, resolved, outside = files_ops._resolve_under_roots(path)
+            if not ok:
+                return {"ok": False, "error": resolved}
+            denied = files_ops._outside_denied(
+                "browser_pdf", resolved, parse_confirm(step.get("confirm", False)),
+            ) if outside else None
+            if denied:
+                return denied
+            if hasattr(browser, "pdf"):
+                return browser.pdf(resolved, step.get("space_id"))
+            return {"ok": False, "error": "browser_pdf not available"}
+        if op in {"browser_tabs", "browser_switch"}:
+            if hasattr(browser, "tabs"):
+                return browser.tabs(
+                    space_id=step.get("space_id"),
+                    index=step.get("index"),
+                    url=step.get("url") or step.get("href"),
+                )
+            return {"ok": False, "error": "browser_tabs not available"}
+        if op == "browser_back":
+            return browser.back(step.get("space_id")) if hasattr(browser, "back") else {"ok": False, "error": "browser_back not available"}
+        if op == "browser_forward":
+            return browser.forward(step.get("space_id")) if hasattr(browser, "forward") else {"ok": False, "error": "browser_forward not available"}
+        if op == "browser_reload":
+            return browser.reload(step.get("space_id")) if hasattr(browser, "reload") else {"ok": False, "error": "browser_reload not available"}
+        if op == "browser_select":
+            sel = str(step.get("selector") or step.get("css") or "")
+            if not sel:
+                return {"ok": False, "error": "browser_select requires selector"}
+            return browser.select(sel, step.get("value") or step.get("option"), step.get("space_id"))
+        if op == "browser_upload":
+            sel = str(step.get("selector") or step.get("css") or "")
+            path = str(step.get("path") or step.get("file") or "")
+            if not sel or not path:
+                return {"ok": False, "error": "browser_upload requires selector and path"}
+            ok, resolved, outside = files_ops._resolve_under_roots(path)
+            if not ok:
+                return {"ok": False, "error": resolved}
+            denied = files_ops._outside_denied(
+                "browser_upload", resolved, parse_confirm(step.get("confirm", False)),
+            ) if outside else None
+            if denied:
+                return denied
+            return browser.upload(sel, resolved, step.get("space_id"))
+        if op == "browser_dialog":
+            return browser.page_dialog(
+                action=str(step.get("action") or "accept"),
+                text=step.get("text") or step.get("prompt"),
+                space_id=step.get("space_id"),
+            )
+        if op == "browser_storage":
+            return browser.storage(str(step.get("kind") or step.get("type") or "local"), step.get("space_id"))
+        if op == "browser_cookies":
+            include = parse_confirm(step.get("confirm", False)) or bool(step.get("include_values"))
+            if include and not parse_confirm(step.get("confirm", False)):
+                include = False
+            return browser.cookies(step.get("space_id"), include_values=include)
+        if op == "browser_console":
+            return browser.console_log(
+                step.get("space_id"),
+                int(step.get("max") or step.get("limit") or 40),
+            )
+        if op == "browser_viewport":
+            return browser.viewport(
+                width=step.get("width") or step.get("w"),
+                height=step.get("height") or step.get("h"),
+                space_id=step.get("space_id"),
+            )
 
         if op in {"screenshot", "shot"}:
             # path => write file; otherwise return compact base64 JPEG via engine helper
@@ -1583,6 +1925,7 @@ class ExoExecEngine:
             "window_max", "window_maximize",
             "window_restore",
             "window_close",
+            "window_move", "window_resize", "window_snap",
             "window", "window_state",
         }:
             if step.get("title"):
@@ -1607,6 +1950,17 @@ class ExoExecEngine:
                     hwnd_i,
                     discard_unsaved=bool(step.get("discard_unsaved", step.get("discard", True))),
                     wait_gone=float(step.get("wait_gone", step.get("timeout", 2.5))),
+                )
+            if op in {"window_move", "window_resize", "window_snap"}:
+                return ctrl.window_move(
+                    hwnd_i,
+                    x=step.get("x"),
+                    y=step.get("y"),
+                    w=step.get("w") or step.get("width"),
+                    h=step.get("h") or step.get("height"),
+                    snap=step.get("snap") or step.get("edge") or (
+                        "left" if op == "window_snap" and step.get("side") else step.get("side")
+                    ),
                 )
             action = str(step.get("action") or step.get("state") or "state").lower()
             if action in {"minimize", "min"}:
@@ -1660,6 +2014,7 @@ class ExoExecEngine:
             if out.get("ok") and out.get("released"):
                 if self._script_lease_token == token:
                     self._script_lease_token = None
+                self._clear_seat()
                 self._maybe_stop_live_eyes(out)
             return out
         if op == "lease_status":
@@ -1859,6 +2214,7 @@ class ExoExecEngine:
                     self._script_lease_token = None
                 elif not token:
                     self._script_lease_token = None
+                self._clear_seat()
                 self._maybe_stop_live_eyes(out)
             return out
 
@@ -1890,6 +2246,13 @@ class ExoExecEngine:
         if op in {"action_log", "log", "recent_actions"}:
             return self._action_log_tail(n=int(step.get("n") or step.get("limit") or step.get("last") or 20))
 
+        if op in {"search", "search_web", "pplx_search", "web_search"}:
+            from exo_control import search_ops
+            return search_ops.search_web(step)
+        if op in {"search_content", "search_snippets", "pplx_content"}:
+            from exo_control import search_ops
+            return search_ops.search_content(step)
+
         return {"ok": False, "error": f"Unknown operation: {op or '<empty>'}"}
 
 
@@ -1909,6 +2272,35 @@ class ExoExecEngine:
                     "timeout": timeout_s,
                     "crashed": True,
                 }
+
+    def _browser_connect(self, browser: Any, step: Dict[str, Any]) -> Dict[str, Any]:
+        provider = str(step.get("provider") or step.get("backend") or "").strip().lower().replace("-", "_")
+        page_url = step.get("page_url") or step.get("url_contains")
+        page_title = step.get("page_title") or step.get("title")
+        endpoint = step.get("cdp_url") or step.get("endpoint") or step.get("url")
+        if provider in {"browser_use", "cloud"}:
+            from exo_control import browser_use_ops
+            started = browser_use_ops.start_browser(step)
+            if not started.get("ok"):
+                return started
+            if started.get("id"):
+                self._browser_use_session = str(started["id"])
+            endpoint = started.get("cdp_url")
+            if not endpoint:
+                return {**started, "ok": False, "error": "browser-use session has no cdp_url"}
+            attached = browser.connect_cdp(str(endpoint), page_url=page_url, page_title=page_title)
+            if isinstance(attached, dict):
+                return {
+                    **started,
+                    **attached,
+                    "provider": "browser-use",
+                    "browser_id": started.get("id"),
+                }
+            return attached
+        if endpoint is None:
+            port = step.get("port")
+            endpoint = f"http://127.0.0.1:{int(port)}" if port is not None else "http://127.0.0.1:9222"
+        return browser.connect_cdp(str(endpoint), page_url=page_url, page_title=page_title)
 
     def _wait_cdp(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """Poll discover_cdp_endpoints until count>0 or timeout (default 15s)."""

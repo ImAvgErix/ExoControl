@@ -56,6 +56,30 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Persistent UI memory across relaunch with invalidate-on-miss
 - [x] Clipboard image round-trip + real Windows notify toast
 - [x] Fuzzy launch → wait_window (PATH + alias + Start Menu)
+- [x] Search as Code: lease-free `search` (`provider=perplexity|tavily|exa|ddg|serper|brave`) + `search_content`
+- [x] Browser Use Cloud: `browser_use` hosted run + `browser_use_start` Chromium (Windows-reachable HTTP/CDP)
+- [x] ego lite: honest Windows-only miss (`ego`); local stand-in is `browser_*` spaces
+- [x] Firecrawl / Jina: lease-free `scrape` (`provider=firecrawl|jina`); `crawl` / `site_map`
+- [x] MarkItDown / Docling: allowrooted `files_convert` (`engine=markitdown|docling`; txt/json/csv/html builtin)
+- [x] Stagehand: lease-free `stagehand` / `browser_act` / `stagehand_extract` (HTTP)
+- [x] Skyvern: lease-free `skyvern` vision task (HTTP)
+- [x] OmniParser: `omni` screenshot → elements (`OMNIPARSER_URL` or fail closed)
+- [x] AgentQL: lease-free `agentql` / `browser_query` (HTTP)
+- [x] Everything: `files_find` (HTTP, else walk allowroots)
+- [x] Memory: `memory_add` / `memory_search` (local JSONL; Mem0 if keyed)
+- [x] Composio / Graph: `composio`, `mail_list`, `cal_next`, `drive_get`
+- [x] Screenpipe: `recall` / `screen_search` (localhost history)
+- [x] Graph Wave 1: `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (CSV or workbook)
+- [x] Jina via `scrape` `provider=jina`; allowrooted `git`; GitHub `gh_pr`
+- [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`
+- [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
+- [x] Wave 2: `rag` / `winsearch` / `steel_start` / `search` providers / `slack` / `notion` / `linear`
+- [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
+- [x] Waves 3–5: Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/tree, sys status (no secret dump / UAC / anti-cheat)
+- [x] Pilot (original): `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`
+- [x] Stock Windows natives (ctypes/netsh/PowerShell/COM) for volume, lock, wifi, power, recycle, TTS, dialog, dark_mode, idle, ports, Defender status, …
+- [x] Honest `ready` map: what works here vs Windows-native vs needs a key (`stt` stays stub)
+- [x] Live seat: `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID (not UIA, not RDP)
 
 ## Hard stops
 

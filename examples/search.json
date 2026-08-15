@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "op": "search",
+      "query": [
+        "Exo Control Windows agent UIA",
+        "Perplexity Search API multi-query"
+      ],
+      "max": 5,
+      "dedupe": true,
+      "rank": "api"
+    }
+  ]
+}

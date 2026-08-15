@@ -3,6 +3,21 @@
 Version history for the **Exo Control** Python package.  
 This is a library (pip / wheel), not a Setup.exe. GitHub Release may include the wheel + sdist.
 
+## 2.2.0
+
+Live seat, Pilot, stock Windows natives, and the desk-ops catalog.
+
+- **Live seat.** `session_open` / `seat` takes the desk like remote access (lease + eyes) and holds it across `execute()` calls until `session_close`. `session_status` never returns the token. `pointer` / `mouse` / `keypress` / `drive` are raw SendInput HID (not UIA, not RDP).
+- **Pilot.** `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`. When a goal is set, successful hands re-glance and attach `changed`.
+- **`ready`.** Honest map: works here / Windows-native / needs a key. `stt` stays a stub.
+- **Stock Windows natives** (ctypes / netsh / PowerShell / COM, no extra pip): volume, recycle, TTS, wifi, power, print, dialog, lnk, certs, winsearch walk, lock, idle, brightness, dark_mode, ports, uptime, USB, Bluetooth, printers, BitLocker status, Defender status, hotfixes, fonts.
+- **`search` / `search_web`.** Fan-out queries (`provider=perplexity|tavily|exa|ddg|serper|brave`). Not UI find. Auth for Perplexity is `PERPLEXITY_API_KEY`; missing key fails closed.
+- **`search_content` / `search_snippets`.** Query-relevant snippets scoped to `urls`.
+- **Browser Use Cloud.** `browser_use`, `browser_use_start` / `browser_use_stop`. `browser_connect` accepts `provider=browser-use` when `BROWSER_USE_API_KEY` is set.
+- **ego lite.** Status-only. Exo Control is Windows-only; local page UI stays `browser_*`.
+- **Merged families.** `search` `provider=`, `files_convert` `engine=markitdown|docling`, `scrape` `provider=firecrawl|jina`, `files_stat` with PDF/image extras. Old names stay as aliases.
+- **Addon + Waves 1–5.** Firecrawl, Stagehand, Skyvern, OmniParser, AgentQL, Everything, memory, Graph, Screenpipe, git, `gh_pr`, Steel, Slack/Notion/Linear/Jira/Discord, pwsh/wsl/docker, zip/sqlite/tree, open data, and Windows desk/sys ops. Writes, exec, lock, and cookie values need `confirm=true`. No LSASS / UAC / anti-cheat / captcha / secret-dump ops.
+
 ## 2.1.0
 
 Human substitute — sit in the chair, use the mouse wheel, look at the screen.
