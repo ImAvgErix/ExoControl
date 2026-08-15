@@ -130,12 +130,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         ident = identity()
         from exo_control.search_ops import configured as search_configured
         from exo_control.browser_use_ops import configured as browser_use_configured
+        from exo_control import addon_ops
         _emit({
             "ok": len(warnings) == 0,
             **ident,
             "search_configured": search_configured(),
             "browser_use_configured": browser_use_configured(),
             "ego_windows_ready": False,
+            **addon_ops.capabilities(),
             "aether": str(aether_path),
             "exo_control": str(exo_path),
             "exo_root": str(exo_root()),

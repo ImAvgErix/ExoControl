@@ -95,6 +95,10 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **OS** | Allowrooted files, HKCU registry, processes/services, fuzzy launch |
 | **Search** | Lease-free Perplexity `search` / `search_content` (`PERPLEXITY_API_KEY`) |
 | **Cloud browser** | Browser Use `browser_use` / `browser_use_start` (`BROWSER_USE_API_KEY`) |
+| **Web extract** | Firecrawl `scrape` / `crawl` / `site_map`; Stagehand `browser_act`; Skyvern; AgentQL |
+| **Docs / find** | `files_convert` (MarkItDown), `files_find` (Everything or walk) |
+| **Memory / history** | `memory_add` / `memory_search` (local or Mem0); `recall` (Screenpipe) |
+| **Mail / calendar** | `mail_list` / `cal_next` / `drive_get` (Graph or Composio) |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 

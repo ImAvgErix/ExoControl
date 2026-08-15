@@ -2259,6 +2259,7 @@ class SmartController:
     def status(self) -> Dict[str, Any]:
         import sys
         from exo_control.search_ops import configured as search_configured
+        from exo_control.addon_ops import capabilities as addon_capabilities
         cua_ok = isinstance(self.backend, CuaBackend)
         eyes_running = bool(self._eyes and getattr(self._eyes, "_running", False))
         ocr_ready = False
@@ -2333,6 +2334,7 @@ class SmartController:
                 "browser_use": True,
                 "ego_lite": False,
                 "ego_windows_ready": False,
+                **addon_capabilities(),
             },
         }
 

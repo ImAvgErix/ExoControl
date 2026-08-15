@@ -75,6 +75,57 @@ OPS: List[Dict[str, Any]] = [
     {"op": "search_content", "aliases": ["search_snippets", "pplx_content"], "lease": False,
      "purpose": "Query-relevant snippets scoped to urls via Perplexity Search",
      "fields": ["urls", "query?", "max?", "contains?"]},
+    {"op": "scrape", "aliases": ["firecrawl", "firecrawl_scrape"], "lease": False,
+     "purpose": "Firecrawl URL → markdown (lease-free; FIRECRAWL_API_KEY)",
+     "fields": ["url", "verbose?"]},
+    {"op": "crawl", "aliases": ["firecrawl_crawl"], "lease": False,
+     "purpose": "Firecrawl site crawl (start or poll id=)",
+     "fields": ["url?", "id?", "limit?"]},
+    {"op": "site_map", "aliases": ["map", "firecrawl_map"], "lease": False,
+     "purpose": "Firecrawl URL map (list links)",
+     "fields": ["url", "max?"]},
+    {"op": "files_convert", "aliases": ["read_doc", "markitdown"], "lease": False,
+     "purpose": "Allowrooted file → markdown (MarkItDown; txt/json/csv/html builtin)",
+     "fields": ["path", "verbose?", "confirm?"]},
+    {"op": "stagehand", "aliases": ["browser_act", "stagehand_act"], "lease": False,
+     "purpose": "Stagehand NL act on a page (BROWSERBASE_API_KEY / STAGEHAND_API_KEY)",
+     "fields": ["instruction", "url?"]},
+    {"op": "stagehand_extract", "aliases": ["browser_extract"], "lease": False,
+     "purpose": "Stagehand NL extract → JSON",
+     "fields": ["instruction", "url?", "schema?"]},
+    {"op": "skyvern", "aliases": ["skyvern_task"], "lease": False,
+     "purpose": "Skyvern vision browser task (SKYVERN_API_KEY)",
+     "fields": ["task?", "url?", "run_id?"]},
+    {"op": "omni", "aliases": ["omni_parse", "omniparser"], "lease": False,
+     "purpose": "OmniParser screenshot → clickable elements (OMNIPARSER_URL)",
+     "fields": ["path?", "image_b64?"]},
+    {"op": "agentql", "aliases": ["browser_query", "page_query"], "lease": False,
+     "purpose": "AgentQL query a URL → JSON (AGENTQL_API_KEY)",
+     "fields": ["url", "query"]},
+    {"op": "files_find", "aliases": ["everything", "find_files"], "lease": False,
+     "purpose": "Find files (Everything HTTP, else walk allowroots)",
+     "fields": ["query", "max?"]},
+    {"op": "memory_add", "aliases": ["mem0_add"], "lease": False,
+     "purpose": "Remember a fact (local JSONL; Mem0 if MEM0_API_KEY)",
+     "fields": ["text", "user_id?"]},
+    {"op": "memory_search", "aliases": ["mem0_search"], "lease": False,
+     "purpose": "Recall stored facts",
+     "fields": ["query", "user_id?", "max?"]},
+    {"op": "composio", "aliases": ["composio_run"], "lease": False,
+     "purpose": "Composio action (COMPOSIO_API_KEY; confirm for send/delete)",
+     "fields": ["action", "input?", "confirm?"]},
+    {"op": "mail_list", "aliases": [], "lease": False,
+     "purpose": "Recent mail (Microsoft Graph token, else Composio)",
+     "fields": ["max?"]},
+    {"op": "cal_next", "aliases": [], "lease": False,
+     "purpose": "Upcoming calendar events (Graph or Composio)",
+     "fields": ["max?"]},
+    {"op": "drive_get", "aliases": [], "lease": False,
+     "purpose": "OneDrive/Graph item by path",
+     "fields": ["path?"]},
+    {"op": "recall", "aliases": ["screen_search", "screenpipe"], "lease": False,
+     "purpose": "Search Screenpipe local screen/audio history",
+     "fields": ["query?", "app?", "max?"]},
     {"op": "env_get", "aliases": [], "lease": False, "purpose": "Env var", "fields": ["name"]},
     {"op": "env_list", "aliases": [], "lease": False, "purpose": "Env var names (values via env_get)", "fields": ["max?"]},
     {"op": "tasks_list", "aliases": [], "lease": False, "purpose": "Scheduled tasks (compact)", "fields": ["max?"]},
@@ -204,6 +255,10 @@ HARNESS_RULES: List[str] = [
     "Never invent UI state — use step results / observe / verify / seen.",
     "search / search_web is lease-free Perplexity retrieval (PERPLEXITY_API_KEY). Use browser_* to operate a page.",
     "browser_use is Browser Use Cloud (BROWSER_USE_API_KEY): hosted task or cloud Chromium CDP.",
+    "scrape/crawl/site_map = Firecrawl. files_convert = MarkItDown. files_find = Everything or walk.",
+    "stagehand / browser_act and agentql / browser_query are lease-free HTTP (not local CDP hands).",
+    "skyvern = vision forms. omni = screenshot parse. recall = Screenpipe. memory_* = local/Mem0.",
+    "mail_list / cal_next / drive_get = Graph or Composio. Mutating Composio actions need confirm=true.",
     "Exo Control is Windows-only. ego lite has no Windows app — use browser_* spaces, not ego-browser.",
 ]
 
@@ -305,8 +360,10 @@ def mcp_instructions() -> str:
         "Hands attach a compact seen glance. Screenshots only when pixels matter (exo_screenshot). "
         "Call exo_help or step {\"op\":\"help\"} for ops (detail=true for the full catalog). "
         "Web facts: {\"op\":\"search\",\"query\":[\"…\",\"…\"]} (PERPLEXITY_API_KEY). "
+        "Page to markdown: {\"op\":\"scrape\",\"url\":\"…\"} (FIRECRAWL_API_KEY). "
         "Cloud browser agent: {\"op\":\"browser_use\",\"task\":\"…\"} (BROWSER_USE_API_KEY). "
-        "Page UI: browser_*. Exo is Windows-only; ego lite has no Windows app. "
+        "Page UI: browser_*. Docs: files_convert / files_find. Memory: memory_add / memory_search. "
+        "Exo is Windows-only; ego lite has no Windows app. "
         "Example: [{\"op\":\"lease_acquire\",\"agent_id\":\"agent\",\"task\":\"demo\",\"ttl_sec\":120},"
         "{\"op\":\"launch\",\"app\":\"notepad\"},{\"op\":\"type\",\"text\":\"hi\"},{\"op\":\"lease_release\"}]. "
         "Hard rules: confirm=true for destructive OS ops; never kill anti-cheat; compact by default; "

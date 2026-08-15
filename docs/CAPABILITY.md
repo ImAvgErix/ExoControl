@@ -59,6 +59,16 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Perplexity Search as Code: lease-free `search` / `search_content` (HTTP; Windows-safe)
 - [x] Browser Use Cloud: `browser_use` hosted run + `browser_use_start` Chromium (Windows-reachable HTTP/CDP)
 - [x] ego lite: honest Windows-only miss (`ego`); local stand-in is `browser_*` spaces
+- [x] Firecrawl: lease-free `scrape` / `crawl` / `site_map` (HTTP; Windows-safe)
+- [x] MarkItDown: allowrooted `files_convert` / `read_doc` (local; txt/json/csv/html builtin)
+- [x] Stagehand: lease-free `stagehand` / `browser_act` / `stagehand_extract` (HTTP)
+- [x] Skyvern: lease-free `skyvern` vision task (HTTP)
+- [x] OmniParser: `omni` screenshot → elements (`OMNIPARSER_URL` or fail closed)
+- [x] AgentQL: lease-free `agentql` / `browser_query` (HTTP)
+- [x] Everything: `files_find` (HTTP, else walk allowroots)
+- [x] Memory: `memory_add` / `memory_search` (local JSONL; Mem0 if keyed)
+- [x] Composio / Graph: `composio`, `mail_list`, `cal_next`, `drive_get`
+- [x] Screenpipe: `recall` / `screen_search` (localhost history)
 
 ## Hard stops
 

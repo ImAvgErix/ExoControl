@@ -14,6 +14,7 @@ Perplexity Search as Code — lease-free web retrieval for any harness.
 - Lease-free. Compact snippets by default (`verbose=true` for longer extracts).
 - **Browser Use Cloud.** `browser_use` (hosted task / poll `run_id`), `browser_use_start` / `browser_use_stop` for a managed Chromium. `browser_connect` accepts `provider=browser-use` or a Browser Use `cdp_url` when `BROWSER_USE_API_KEY` is set. Remote CDP stays denied unless it is Browser Use or `EXO_ALLOW_REMOTE_CDP=1`.
 - **ego lite.** Status-only. Exo Control is Windows-only; ego lite has no Windows app. Local page UI stays `browser_*` Playwright spaces.
+- **Addon ops (Windows-safe HTTP or local).** Firecrawl `scrape` / `crawl` / `site_map`; MarkItDown `files_convert`; Stagehand `stagehand` / `browser_act`; Skyvern `skyvern`; OmniParser `omni`; AgentQL `agentql`; Everything `files_find` (walk fallback); Mem0/local `memory_add` / `memory_search`; Composio/Graph `mail_list` / `cal_next` / `drive_get`; Screenpipe `recall`. Missing keys fail closed. Mutating Composio actions need `confirm=true`.
 
 ## 2.1.0
 

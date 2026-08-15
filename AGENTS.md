@@ -52,9 +52,11 @@ Installed at `%LOCALAPPDATA%\ExoLauncher\app\ExoLauncher.exe`. Prefer CDP/DOM wh
 ]
 ```
 
-Web facts (lease-free): `{"op":"search","query":["…","…"]}` with `PERPLEXITY_API_KEY`. That is not UI find — use `type`/`click` for in-app search boxes.
+Web facts (lease-free): `{"op":"search","query":["…","…"]}` with `PERPLEXITY_API_KEY`. That is not UI find — use `type`/`click` for in-app search boxes. Full page markdown: `{"op":"scrape","url":"…"}` (`FIRECRAWL_API_KEY`).
 
-Cloud web agent: `{"op":"browser_use","task":"…"}` with `BROWSER_USE_API_KEY`. Cloud Chromium: `browser_use_start` then `browser_connect` (`provider=browser-use` or the returned `cdp_url`). Local page UI stays `browser_*`.
+Cloud web agent: `{"op":"browser_use","task":"…"}` with `BROWSER_USE_API_KEY`. Cloud Chromium: `browser_use_start` then `browser_connect` (`provider=browser-use` or the returned `cdp_url`). Local page UI stays `browser_*`. Stagehand `browser_act` / AgentQL `browser_query` / Skyvern `skyvern` are lease-free HTTP, not CDP hands.
+
+Docs on disk: `files_convert` / `files_find`. Facts: `memory_add` / `memory_search`. Screen history: `recall`. Mail/calendar: `mail_list` / `cal_next` (Graph or Composio).
 
 Exo Control is **Windows-only**. ego lite has no Windows app — do not call `ego-browser`. `{"op":"ego"}` reports that.
 

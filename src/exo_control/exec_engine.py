@@ -492,17 +492,8 @@ class ExoExecEngine:
         if op == "desktop":
             action = str(step.get("action") or "list").lower()
             needs = action in {"switch", "goto", "set"}
-        # Read-only aliases must never require a lease even if mis-listed.
-        if op in {
-            "proc_list", "service_list", "service_status", "registry_read",
-            "files_list", "files_read", "env_get", "env_list", "tasks_list",
-            "startup_list", "observe_budget",
-            "search", "search_web", "pplx_search", "web_search",
-            "search_content", "search_snippets", "pplx_content",
-            "browser_use", "browser_use_task", "browser_use_run",
-            "browser_use_start", "browser_cloud", "browser_use_stop",
-            "ego", "ego_status", "ego_lite",
-        }:
+        # Catalog lease-free wins — including browser_act / browser_query HTTP aliases.
+        if op in LEASE_FREE_OPS:
             needs = False
         if not needs:
             return None
@@ -520,22 +511,8 @@ class ExoExecEngine:
             "list_cursors", "cursors",
         }:
             return False
-        if op in LEASE_FREE_OPS and op != "notify":
-            # read-only / wait / verify — not injects
-            if op.startswith("wait") or op.startswith("verify") or op in {
-                "windows", "list_windows", "observe", "compact_observe", "read", "read_ui",
-                "cdp", "cdp_discover", "exo_cdp", "status", "stats", "clipboard_get",
-                "eyes", "eyes_start", "eyes_stop", "eyes_read", "look", "glance",
-                "apps", "files_list", "files_read", "notify", "clipboard_image_save", "wait_window",
-                "observe_budget", "registry_read", "proc_list", "service_list", "service_status",
-                "env_get", "env_list", "tasks_list", "startup_list",
-                "search", "search_web", "pplx_search", "web_search",
-                "search_content", "search_snippets", "pplx_content",
-                "browser_use", "browser_use_task", "browser_use_run",
-                "browser_use_start", "browser_cloud", "browser_use_stop",
-                "ego", "ego_status", "ego_lite",
-            }:
-                return False
+        if op in LEASE_FREE_OPS:
+            return False
         if op == "proc":
             action = str(step.get("action") or step.get("mode") or "list").lower()
             return action in {"kill", "stop", "terminate"}
@@ -804,6 +781,9 @@ class ExoExecEngine:
             "search", "search_web", "pplx_search", "web_search",
             "search_content", "search_snippets", "pplx_content",
             "browser_use", "browser_use_task", "browser_use_run",
+            "scrape", "firecrawl", "crawl", "site_map",
+            "files_convert", "read_doc", "agentql", "browser_query",
+            "memory_search", "recall", "screen_search",
         }
         if op not in compact_ops:
             return value
@@ -1029,13 +1009,14 @@ class ExoExecEngine:
                 if isinstance(caps, dict):
                     caps["search_web"] = True
                     caps["search_configured"] = search_ops.configured()
-                    from exo_control import browser_use_ops, ego_ops
+                    from exo_control import addon_ops, browser_use_ops, ego_ops
                     caps["browser_use"] = True
                     caps["browser_use_configured"] = browser_use_ops.configured()
                     caps["ego_lite"] = False
                     caps["ego_windows_ready"] = False
                     ego = ego_ops.detect()
                     caps["ego_available"] = bool(ego.get("available"))
+                    caps.update(addon_ops.capabilities())
             return st
         if op in {"windows", "list_windows"}:
             mon = step.get("monitor")
@@ -1287,6 +1268,11 @@ class ExoExecEngine:
         if op in {"ego", "ego_status", "ego_lite"}:
             from exo_control import ego_ops
             return ego_ops.detect()
+
+        from exo_control import addon_ops
+        addon = addon_ops.dispatch(op, step)
+        if addon is not None:
+            return addon
 
         browser = self._get_browser() if op.startswith("browser_") else None
         if op == "browser_connect":

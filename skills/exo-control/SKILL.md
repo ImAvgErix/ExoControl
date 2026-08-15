@@ -15,7 +15,7 @@ Hardened PC control plane. Not tied to Cursor, Grok, Claude, or Codex — those 
 
 Server: `python -m exo_control.slim_mcp_server`  
 Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"` (or `pip install -e .`).  
-Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`. `PERPLEXITY_API_KEY` unlocks `search`. `BROWSER_USE_API_KEY` unlocks `browser_use`.
+Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`. `PERPLEXITY_API_KEY` unlocks `search`. `BROWSER_USE_API_KEY` unlocks `browser_use`. `FIRECRAWL_API_KEY` unlocks `scrape`. Local `files_convert` / `files_find` / `memory_*` work without cloud keys.
 
 ## Rules
 
@@ -48,6 +48,17 @@ Hosted web agent or a managed Chromium you drive with existing `browser_*` ops. 
 ## ego lite
 
 `{"op":"ego"}` only. ego lite has no Windows app. Use `browser_*` spaces on this machine.
+
+## Other lease-free addons
+
+```json
+{"op": "scrape", "url": "https://example.com"}
+{"op": "files_convert", "path": "C:/Users/you/.exo/workspace/notes.docx"}
+{"op": "files_find", "query": "Q3-forecast"}
+{"op": "memory_add", "text": "Prefers dark mode"}
+{"op": "recall", "query": "standup"}
+{"op": "mail_list", "max": 5}
+```
 
 ## Minimal script
 

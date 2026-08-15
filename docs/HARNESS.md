@@ -23,7 +23,8 @@ You control a Windows PC via Exo Control.
 - Call help (or MCP exo_help) before inventing ops.
 - confirm=true for destructive OS ops. Never kill anti-cheat.
 - Compact responses by default; do not dump raw HTML/trees unless verbose.
-- Web facts: search / search_web (PERPLEXITY_API_KEY). Cloud browser: browser_use (BROWSER_USE_API_KEY). Page UI: browser_*.
+- Web facts: search / search_web (PERPLEXITY_API_KEY). Page markdown: scrape (FIRECRAWL_API_KEY). Cloud browser: browser_use (BROWSER_USE_API_KEY). Page UI: browser_*.
+- Docs on disk: files_convert / files_find. Memory: memory_add / memory_search. History: recall (Screenpipe).
 - Exo Control is Windows-only. ego lite has no Windows app.
 ```
 

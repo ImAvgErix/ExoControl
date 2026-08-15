@@ -4,7 +4,7 @@ Exo Control is the shared pair of **eyes and hands** on a Windows machine. Agent
 
 ## Model
 
-1. **Eyes (read-only)** — `windows`, `observe`/`read`, `eyes`, `eyes_read`/`look`, `cdp_discover`, `wait_cdp`, `status`, `stats`, `clipboard_get`, `apps`, `files_list` (inside roots), `search` / `search_content` (Perplexity; `PERPLEXITY_API_KEY`), `browser_use` / `browser_use_start` (Browser Use Cloud; `BROWSER_USE_API_KEY`), `ego` (status only), `lease_*`, `help`. No lease required.
+1. **Eyes (read-only)** — `windows`, `observe`/`read`, `eyes`, `eyes_read`/`look`, `cdp_discover`, `wait_cdp`, `status`, `stats`, `clipboard_get`, `apps`, `files_list` (inside roots), `search` / `search_content` (Perplexity; `PERPLEXITY_API_KEY`), `scrape` / `files_convert` / `files_find` / `memory_*` / `recall` / `mail_list`, `browser_use` / `browser_use_start` (Browser Use Cloud; `BROWSER_USE_API_KEY`), `ego` (status only), `lease_*`, `help`. No lease required.
 2. **Hands (mutating)** — click/type/scroll/scroll_into_view/hover/drag/hotkey/fill/focus/window_*/launch/open/screenshot/browser_*/clipboard_set/proc-kill/notify. Require a valid desktop lease.
 
 `lease_acquire` starts a live eyes loop (disable with `eyes:false` or `EXO_LIVE_EYES=0`). After hands, the step result includes a compact `seen` glance. Scroll is an aimed SendInput wheel on the document — never Home/End. Browser scroll hits the page (`window.scrollBy` / `scrollIntoView`), not chrome.
