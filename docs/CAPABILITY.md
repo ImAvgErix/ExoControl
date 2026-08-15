@@ -71,7 +71,8 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Screenpipe: `recall` / `screen_search` (localhost history)
 - [x] Graph Wave 1: `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (CSV or workbook)
 - [x] Jina via `scrape` `provider=jina`; allowrooted `git`; GitHub `gh_pr`
-- [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`
+- [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `tts`
+- [ ] `stt` is a stub (see `ready`)
 - [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
 - [x] Wave 2: `rag` / `winsearch` / `steel_start` / `search` providers / `slack` / `notion` / `linear`
 - [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
@@ -91,8 +92,8 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 ## Install (library — no installer EXE)
 
 ```bash
-pip install -e .
-# or PYTHONPATH to src
+pip install exo-control
+# fallback: pip install -e .  or  pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 python -m exo_control.slim_mcp_server
 ```
 
