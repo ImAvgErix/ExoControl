@@ -62,6 +62,9 @@ Hosted web agent or a managed Chromium you drive with existing `browser_*` ops. 
 {"op": "read_url", "url": "https://example.com"}
 {"op": "git", "path": "C:/Users/you/.exo/workspace/repo", "action": "status"}
 {"op": "xlsx", "path": "C:/Users/you/.exo/workspace/sheet.csv", "range": "A1:C10"}
+{"op": "rag", "query": "Q3 forecast"}
+{"op": "tavily", "query": "rust async runtimes"}
+{"op": "hash", "path": "C:/Users/you/.exo/workspace/a.bin"}
 ```
 
 ## Minimal script

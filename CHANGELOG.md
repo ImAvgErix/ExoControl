@@ -16,6 +16,7 @@ Perplexity Search as Code — lease-free web retrieval for any harness.
 - **ego lite.** Status-only. Exo Control is Windows-only; ego lite has no Windows app. Local page UI stays `browser_*` Playwright spaces.
 - **Addon ops (Windows-safe HTTP or local).** Firecrawl `scrape` / `crawl` / `site_map`; MarkItDown `files_convert`; Stagehand `stagehand` / `browser_act`; Skyvern `skyvern`; OmniParser `omni`; AgentQL `agentql`; Everything `files_find` (walk fallback); Mem0/local `memory_add` / `memory_search`; Composio/Graph `mail_list` / `cal_next` / `drive_get`; Screenpipe `recall`. Missing keys fail closed. Mutating Composio actions need `confirm=true`.
 - **Wave 1 desk ops.** Graph `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (local CSV or workbook); Jina `read_url`; allowrooted `git`; GitHub `gh_pr`; Windows `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`; leased `window_move`; CDP `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`. `mail_send`, volume set, and recycle empty need `confirm=true`.
+- **Wave 2 desk ops.** Docling `docling`; local `rag`; Windows Search `winsearch`; Steel `steel_start` / `steel_stop`; Tavily / Exa search; Slack / Notion / Linear; `pwsh` / `wsl` / `docker`; `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`. Slack post, pwsh, wsl exec, docker run, print, dialog, power sleep, and lnk create need `confirm=true`.
 
 ## 2.1.0
 

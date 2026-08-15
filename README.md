@@ -100,6 +100,7 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Memory / history** | `memory_add` / `memory_search` (local or Mem0); `recall` (Screenpipe) |
 | **Mail / calendar** | `mail_list` / `cal_next` / `drive_get` / `todo` / `onenote` / `teams` / `mail_send` (Graph or Composio) |
 | **Desk extras** | `xlsx`, `read_url`, `git`, `gh_pr`, `volume`, `winget`, `recycle`, `eventlog`, `window_move`, `browser_network` / `pdf` / `tabs` |
+| **Wave 2** | `docling` / `rag` / `tavily` / `exa` / `steel_start` / `slack` / `notion` / `linear` / `pwsh` / `docker` / `hash` / `whoami` / `disk` |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 

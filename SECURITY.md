@@ -39,6 +39,12 @@ Exo Control runs as the logged-in Windows user. It is **not a sandbox**. Anyone 
 | `COMPOSIO_API_KEY` / `MICROSOFT_GRAPH_TOKEN` | unset | Enables `composio` / `mail_list` / `cal_next` / `drive_get` / `todo` / `onenote` / `teams` / `mail_send` / Graph `xlsx` |
 | `JINA_API_KEY` | unset | Optional auth for `read_url` (Jina Reader works without it) |
 | `GITHUB_TOKEN` / `GH_TOKEN` | unset | Enables `gh_pr` |
+| `STEEL_API_KEY` | unset | Enables `steel_start` / `steel_stop` (traffic leaves the machine) |
+| `TAVILY_API_KEY` | unset | Enables `tavily` search |
+| `EXA_API_KEY` | unset | Enables `exa` search |
+| `SLACK_BOT_TOKEN` / `SLACK_TOKEN` | unset | Enables `slack` |
+| `NOTION_API_KEY` | unset | Enables `notion` |
+| `LINEAR_API_KEY` | unset | Enables `linear` |
 | `OMNIPARSER_URL` | unset | Local OmniParser HTTP for `omni` |
 | `EVERYTHING_URL` | `http://127.0.0.1` | Everything HTTP; miss falls back to allowroot walk |
 | `SCREENPIPE_URL` | `http://127.0.0.1:3030` | Screenpipe `recall` (loopback) |
@@ -54,4 +60,4 @@ Desktop hands require an acquired lease. Agents share the machine; they do not o
 
 ## Confirm gates
 
-Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch, `mail_send`, volume set, recycle empty) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk."
+Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch, `mail_send`, volume set, recycle empty, Slack post, `pwsh`, WSL exec, docker run/rm, `print`, `dialog`, power sleep, lnk create) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk."

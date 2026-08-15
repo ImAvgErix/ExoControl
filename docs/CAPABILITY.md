@@ -73,6 +73,8 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Jina `read_url`; allowrooted `git`; GitHub `gh_pr`
 - [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`
 - [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
+- [x] Wave 2: `docling` / `rag` / `winsearch` / `steel_start` / `tavily` / `exa` / `slack` / `notion` / `linear`
+- [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
 
 ## Hard stops
 
