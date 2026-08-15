@@ -93,15 +93,15 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Desktop** | UIA click/type/fill, aimed wheel + `scroll_into_view` + hover, live eyes, lease, multi-monitor |
 | **Browser** | CDP snapshot refs, DOM click/type, page `scrollBy` / `scrollIntoView` |
 | **OS** | Allowrooted files, HKCU registry, processes/services, fuzzy launch |
-| **Search** | Lease-free Perplexity `search` / `search_content` (`PERPLEXITY_API_KEY`) |
+| **Search** | Lease-free `search` (`provider=perplexity\|tavily\|exa\|ddg\|serper\|brave`) + `search_content` |
 | **Cloud browser** | Browser Use `browser_use` / `browser_use_start` (`BROWSER_USE_API_KEY`) |
-| **Web extract** | Firecrawl `scrape` / `crawl` / `site_map`; Stagehand `browser_act`; Skyvern; AgentQL |
-| **Docs / find** | `files_convert` (MarkItDown), `files_find` (Everything or walk) |
+| **Web extract** | `scrape` (`provider=firecrawl\|jina`); `crawl` / `site_map`; Stagehand `browser_act`; Skyvern; AgentQL |
+| **Docs / find** | `files_convert` (`engine=markitdown\|docling`), `files_find` (Everything or walk) |
 | **Memory / history** | `memory_add` / `memory_search` (local or Mem0); `recall` (Screenpipe) |
 | **Mail / calendar** | `mail_list` / `cal_next` / `drive_get` / `todo` / `onenote` / `teams` / `mail_send` (Graph or Composio) |
-| **Desk extras** | `xlsx`, `read_url`, `git`, `gh_pr`, `volume`, `winget`, `recycle`, `eventlog`, `window_move`, `browser_network` / `pdf` / `tabs` |
-| **Wave 2** | `docling` / `rag` / `tavily` / `exa` / `steel_start` / `slack` / `notion` / `linear` / `pwsh` / `docker` / `hash` / `whoami` / `disk` |
-| **Waves 3–5** | Graph writes, CDP extras, `ddg`/`wiki`/`weather`/`hn`, Jira/Discord/Airtable, `zip`/`sqlite`/`tree`, `which`/`dns`/`lock_pc` |
+| **Desk extras** | `xlsx`, `git`, `gh_pr`, `volume`, `winget`, `recycle`, `eventlog`, `window_move`, `browser_network` / `pdf` / `tabs` |
+| **Wave 2** | `rag` / `steel_start` / `slack` / `notion` / `linear` / `pwsh` / `docker` / `hash` / `whoami` / `disk` |
+| **Waves 3–5** | Graph writes, CDP extras, `wiki`/`weather`/`hn`, Jira/Discord/Airtable, `zip`/`sqlite`/`tree`, `which`/`dns`/`lock_pc` |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 

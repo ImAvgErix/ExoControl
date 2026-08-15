@@ -1,6 +1,8 @@
-"""Tavily + Exa web search (HTTP, Windows-safe).
+"""Web search backends + a single ``search`` dispatcher.
 
-Auth: ``TAVILY_API_KEY`` / ``EXA_API_KEY`` (``EXO_*`` aliases).
+Tavily / Exa keep their HTTP contracts. ``search(step)`` routes by
+``provider=`` or the original op name (``tavily``, ``ddg``, …).
+Perplexity stays the default for bare ``search`` / ``search_web``.
 """
 from __future__ import annotations
 
@@ -11,6 +13,29 @@ from exo_control.http_json import clip_int, env_key, error_from_http, request_js
 _REQUEST_JSON = None
 TAVILY_URL = "https://api.tavily.com/search"
 EXA_URL = "https://api.exa.ai/search"
+
+_OP_PROVIDER = {
+    "tavily": "tavily",
+    "tavily_search": "tavily",
+    "exa": "exa",
+    "exa_search": "exa",
+    "ddg": "ddg",
+    "duckduckgo": "ddg",
+    "serper": "serper",
+    "serper_search": "serper",
+    "brave": "brave",
+    "brave_search": "brave",
+    "search": "perplexity",
+    "search_web": "perplexity",
+    "pplx_search": "perplexity",
+    "web_search": "perplexity",
+}
+_PROVIDER_ALIASES = {
+    "pplx": "perplexity",
+    "web": "perplexity",
+    "duckduckgo": "ddg",
+    "google": "serper",
+}
 
 
 def tavily_key() -> Optional[str]:
@@ -110,3 +135,38 @@ def exa(step: Dict[str, Any]) -> Dict[str, Any]:
         return error_from_http(status, parsed, raw, what="exa")
     results = _rows(parsed)
     return {"ok": True, "provider": "exa", "query": query, "results": results, "count": len(results)}
+
+
+def _search_provider(step: Dict[str, Any]) -> str:
+    raw = str(step.get("provider") or step.get("engine") or "").strip().lower()
+    if raw:
+        return _PROVIDER_ALIASES.get(raw, raw)
+    op = str(step.get("_op") or "search").strip().lower()
+    return _OP_PROVIDER.get(op, "perplexity")
+
+
+def search(step: Dict[str, Any]) -> Dict[str, Any]:
+    """Route ``search`` / aliases to one backend. Old op names keep working."""
+    provider = _search_provider(step)
+    if provider == "tavily":
+        return tavily(step)
+    if provider == "exa":
+        return exa(step)
+    if provider == "ddg":
+        from exo_control import open_data_ops
+        return open_data_ops.ddg(step)
+    if provider == "serper":
+        from exo_control import saas2_ops
+        return saas2_ops.serper(step)
+    if provider == "brave":
+        from exo_control import saas2_ops
+        return saas2_ops.brave(step)
+    if provider == "perplexity":
+        from exo_control import search_ops
+        return search_ops.search_web(step)
+    return {
+        "ok": False,
+        "error": f"unknown search provider: {provider}",
+        "code": "BAD_PROVIDER",
+        "hint": "provider=perplexity|tavily|exa|ddg|serper|brave",
+    }

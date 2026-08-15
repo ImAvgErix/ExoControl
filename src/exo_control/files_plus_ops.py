@@ -36,6 +36,9 @@ def files_mkdir(step: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "path": got["path"], "created": True}
 
 
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".ico"}
+
+
 def files_stat(step: Dict[str, Any]) -> Dict[str, Any]:
     got = _resolve("files_stat", str(step.get("path") or step.get("file") or ""), step.get("confirm"))
     if not got.get("ok"):
@@ -44,14 +47,21 @@ def files_stat(step: Dict[str, Any]) -> Dict[str, Any]:
     if not p.exists():
         return {"ok": False, "error": f"not found: {p}", "code": "NOT_FOUND"}
     st = p.stat()
-    return {
+    suffix = p.suffix.lower()
+    out: Dict[str, Any] = {
         "ok": True,
         "path": str(p),
         "is_file": p.is_file(),
         "is_dir": p.is_dir(),
         "size": int(st.st_size),
         "mtime": int(st.st_mtime),
+        "suffix": suffix,
     }
+    if p.is_file() and (suffix == ".pdf" or step.get("_op") == "pdf_info"):
+        out["pdf"] = p.read_bytes()[:16].startswith(b"%PDF")
+    if p.is_file() and (suffix in _IMAGE_SUFFIXES or step.get("_op") == "image_info"):
+        out["image"] = suffix in _IMAGE_SUFFIXES
+    return out
 
 
 def tree(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -164,30 +174,21 @@ def sqlite(step: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def pdf_info(step: Dict[str, Any]) -> Dict[str, Any]:
-    got = _resolve("pdf_info", str(step.get("path") or step.get("file") or ""), step.get("confirm"))
-    if not got.get("ok"):
-        return got
-    p = Path(got["path"])
-    if not p.is_file():
-        return {"ok": False, "error": f"not found: {p}", "code": "NOT_FOUND"}
-    head = p.read_bytes()[:16]
-    return {
-        "ok": True,
-        "path": str(p),
-        "pdf": head.startswith(b"%PDF"),
-        "size": p.stat().st_size,
-        "suffix": p.suffix.lower(),
-    }
+    payload = dict(step)
+    payload["_op"] = "pdf_info"
+    out = files_stat(payload)
+    if out.get("ok") and not out.get("is_file"):
+        return {"ok": False, "error": f"not found: {out.get('path')}", "code": "NOT_FOUND"}
+    return out
 
 
 def image_info(step: Dict[str, Any]) -> Dict[str, Any]:
-    got = _resolve("image_info", str(step.get("path") or step.get("file") or ""), step.get("confirm"))
-    if not got.get("ok"):
-        return got
-    p = Path(got["path"])
-    if not p.is_file():
-        return {"ok": False, "error": f"not found: {p}", "code": "NOT_FOUND"}
-    return {"ok": True, "path": str(p), "size": p.stat().st_size, "suffix": p.suffix.lower()}
+    payload = dict(step)
+    payload["_op"] = "image_info"
+    out = files_stat(payload)
+    if out.get("ok") and not out.get("is_file"):
+        return {"ok": False, "error": f"not found: {out.get('path')}", "code": "NOT_FOUND"}
+    return out
 
 
 def b64(step: Dict[str, Any]) -> Dict[str, Any]:

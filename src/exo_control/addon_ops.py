@@ -34,18 +34,41 @@ from exo_control import (
 
 Handler = Callable[[Dict[str, Any]], Dict[str, Any]]
 
+_JINA_OPS = {"read_url", "jina", "url_md"}
+_DOCLING_OPS = {"docling", "docling_convert"}
+
+
+def _scrape(step: Dict[str, Any]) -> Dict[str, Any]:
+    provider = str(step.get("provider") or step.get("engine") or "").strip().lower()
+    op = str(step.get("_op") or "").strip().lower()
+    if provider in {"jina"} or (not provider and op in _JINA_OPS):
+        return jina_ops.read_url(step)
+    return firecrawl_ops.scrape(step)
+
+
+def _convert(step: Dict[str, Any]) -> Dict[str, Any]:
+    engine = str(step.get("engine") or step.get("provider") or "").strip().lower()
+    op = str(step.get("_op") or "").strip().lower()
+    if engine in {"docling"} or (not engine and op in _DOCLING_OPS):
+        return docling_ops.convert(step)
+    return markitdown_ops.convert(step)
+
+
 ROUTES: Dict[str, Handler] = {
-    "scrape": firecrawl_ops.scrape,
-    "firecrawl": firecrawl_ops.scrape,
-    "firecrawl_scrape": firecrawl_ops.scrape,
+    "scrape": _scrape,
+    "firecrawl": _scrape,
+    "firecrawl_scrape": _scrape,
+    "read_url": _scrape,
+    "jina": _scrape,
+    "url_md": _scrape,
     "crawl": firecrawl_ops.crawl,
     "firecrawl_crawl": firecrawl_ops.crawl,
     "site_map": firecrawl_ops.site_map,
     "map": firecrawl_ops.site_map,
     "firecrawl_map": firecrawl_ops.site_map,
-    "files_convert": markitdown_ops.convert,
-    "read_doc": markitdown_ops.convert,
-    "markitdown": markitdown_ops.convert,
+    "files_convert": _convert,
+    "read_doc": _convert,
+    "markitdown": _convert,
     "stagehand": stagehand_ops.act,
     "browser_act": stagehand_ops.act,
     "stagehand_act": stagehand_ops.act,
@@ -103,16 +126,17 @@ ROUTES: Dict[str, Handler] = {
     "tts": win_desk_ops.tts,
     "speak": win_desk_ops.tts,
     "sapi": win_desk_ops.tts,
-    "read_url": jina_ops.read_url,
-    "jina": jina_ops.read_url,
-    "url_md": jina_ops.read_url,
+    "search": web_search_ops.search,
+    "search_web": web_search_ops.search,
+    "pplx_search": web_search_ops.search,
+    "web_search": web_search_ops.search,
     "git": git_ops.git,
     "git_status": git_ops.git,
     "gh_pr": github_ops.gh_pr,
     "github_pr": github_ops.gh_pr,
     "pr_status": github_ops.gh_pr,
-    "docling": docling_ops.convert,
-    "docling_convert": docling_ops.convert,
+    "docling": _convert,
+    "docling_convert": _convert,
     "rag": rag_ops.search,
     "rag_search": rag_ops.search,
     "winsearch": win_sys_ops.winsearch,
@@ -121,10 +145,10 @@ ROUTES: Dict[str, Handler] = {
     "steel": steel_ops.start_session,
     "steel_browser": steel_ops.start_session,
     "steel_stop": steel_ops.stop_session,
-    "tavily": web_search_ops.tavily,
-    "tavily_search": web_search_ops.tavily,
-    "exa": web_search_ops.exa,
-    "exa_search": web_search_ops.exa,
+    "tavily": web_search_ops.search,
+    "tavily_search": web_search_ops.search,
+    "exa": web_search_ops.search,
+    "exa_search": web_search_ops.search,
     "slack": saas_ops.slack,
     "slack_list": saas_ops.slack,
     "notion": saas_ops.notion,
@@ -163,8 +187,8 @@ ROUTES: Dict[str, Handler] = {
     "drive_put": graph_ops.drive_put,
     "drive_upload": graph_ops.drive_put,
     "mail_reply": graph_ops.mail_reply,
-    "ddg": open_data_ops.ddg,
-    "duckduckgo": open_data_ops.ddg,
+    "ddg": web_search_ops.search,
+    "duckduckgo": web_search_ops.search,
     "wiki": open_data_ops.wiki,
     "wikipedia": open_data_ops.wiki,
     "weather": open_data_ops.weather,
@@ -184,10 +208,10 @@ ROUTES: Dict[str, Handler] = {
     "github_issue": github_ops.gh_issue,
     "telegram": saas2_ops.telegram,
     "tg": saas2_ops.telegram,
-    "serper": saas2_ops.serper,
-    "serper_search": saas2_ops.serper,
-    "brave": saas2_ops.brave,
-    "brave_search": saas2_ops.brave,
+    "serper": web_search_ops.search,
+    "serper_search": web_search_ops.search,
+    "brave": web_search_ops.search,
+    "brave_search": web_search_ops.search,
     "zip": files_plus_ops.zip_files,
     "zip_files": files_plus_ops.zip_files,
     "unzip": files_plus_ops.unzip_files,
@@ -248,7 +272,9 @@ def dispatch(op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     fn = ROUTES.get(op)
     if fn is None:
         return None
-    return fn(step)
+    payload = dict(step)
+    payload.setdefault("_op", op)
+    return fn(payload)
 
 
 def capabilities() -> Dict[str, Any]:

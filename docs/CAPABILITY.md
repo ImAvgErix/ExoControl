@@ -56,11 +56,11 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Persistent UI memory across relaunch with invalidate-on-miss
 - [x] Clipboard image round-trip + real Windows notify toast
 - [x] Fuzzy launch → wait_window (PATH + alias + Start Menu)
-- [x] Perplexity Search as Code: lease-free `search` / `search_content` (HTTP; Windows-safe)
+- [x] Search as Code: lease-free `search` (`provider=perplexity|tavily|exa|ddg|serper|brave`) + `search_content`
 - [x] Browser Use Cloud: `browser_use` hosted run + `browser_use_start` Chromium (Windows-reachable HTTP/CDP)
 - [x] ego lite: honest Windows-only miss (`ego`); local stand-in is `browser_*` spaces
-- [x] Firecrawl: lease-free `scrape` / `crawl` / `site_map` (HTTP; Windows-safe)
-- [x] MarkItDown: allowrooted `files_convert` / `read_doc` (local; txt/json/csv/html builtin)
+- [x] Firecrawl / Jina: lease-free `scrape` (`provider=firecrawl|jina`); `crawl` / `site_map`
+- [x] MarkItDown / Docling: allowrooted `files_convert` (`engine=markitdown|docling`; txt/json/csv/html builtin)
 - [x] Stagehand: lease-free `stagehand` / `browser_act` / `stagehand_extract` (HTTP)
 - [x] Skyvern: lease-free `skyvern` vision task (HTTP)
 - [x] OmniParser: `omni` screenshot → elements (`OMNIPARSER_URL` or fail closed)
@@ -70,10 +70,10 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Composio / Graph: `composio`, `mail_list`, `cal_next`, `drive_get`
 - [x] Screenpipe: `recall` / `screen_search` (localhost history)
 - [x] Graph Wave 1: `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (CSV or workbook)
-- [x] Jina `read_url`; allowrooted `git`; GitHub `gh_pr`
+- [x] Jina via `scrape` `provider=jina`; allowrooted `git`; GitHub `gh_pr`
 - [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`
 - [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
-- [x] Wave 2: `docling` / `rag` / `winsearch` / `steel_start` / `tavily` / `exa` / `slack` / `notion` / `linear`
+- [x] Wave 2: `rag` / `winsearch` / `steel_start` / `search` providers / `slack` / `notion` / `linear`
 - [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
 - [x] Waves 3–5: Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/tree, sys status (no secret dump / UAC / anti-cheat)
 
