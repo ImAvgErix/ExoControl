@@ -371,6 +371,33 @@ OPS: List[Dict[str, Any]] = [
      "purpose": "Arm/disarm global kill (blocks hands)", "fields": ["armed?"]},
     {"op": "action_log", "aliases": ["log", "recent_actions"], "lease": False,
      "purpose": "Recent mutating injects", "fields": ["n?"]},
+    {"op": "goal", "aliases": ["intent"], "lease": False,
+     "purpose": "Declare the job (Pilot). Later proof/heal/skills attach to this intent",
+     "fields": ["text"]},
+    {"op": "checkpoint", "aliases": [], "lease": False,
+     "purpose": "Mark Pilot progress toward the current goal",
+     "fields": ["note", "done?"]},
+    {"op": "proof", "aliases": [], "lease": False,
+     "purpose": "Evidence pack: goal, checkpoints, last glance, last error",
+     "fields": []},
+    {"op": "changed", "aliases": ["what_changed"], "lease": False,
+     "purpose": "Structured diff of the last two observe/read glances (added/removed labels)",
+     "fields": []},
+    {"op": "undo", "aliases": [], "lease": False,
+     "purpose": "Reverse the last reversible mutation (files_write/delete, clipboard_set)",
+     "fields": []},
+    {"op": "skill_save", "aliases": [], "lease": False,
+     "purpose": "Save this script's successful hands as a named skill",
+     "fields": ["name", "steps?"]},
+    {"op": "skill_run", "aliases": ["replay"], "lease": False,
+     "purpose": "Replay a saved skill (inner steps still honor lease/confirm)",
+     "fields": ["name"]},
+    {"op": "skill_list", "aliases": [], "lease": False,
+     "purpose": "List saved Pilot skills",
+     "fields": []},
+    {"op": "heal", "aliases": [], "lease": False,
+     "purpose": "One bounded retry of the last failed hand (after you fix lease/focus)",
+     "fields": []},
     # Hands (lease required)
     {"op": "focus", "aliases": ["smart_focus"], "lease": True,
      "purpose": "Foreground window by title/pid; optional monitor bind", "fields": ["title?", "pid?", "monitor?"]},
@@ -538,6 +565,7 @@ HARNESS_RULES: List[str] = [
     "rag = local docs. steel_start = cloud Chromium. slack/notion/linear posts need confirm.",
     "pwsh/wsl exec/docker run, print, dialog, power sleep, lnk create need confirm=true.",
     "Waves 3–5: Graph writes, CDP extras, ddg/wiki/weather/hn, more SaaS, zip/sqlite/tree, which/dns/lock_pc.",
+    "Pilot (original): goal → hands → checkpoint → proof. changed diffs glances. undo reverses writes. skill_save/run is muscle memory. heal retries the last miss once.",
     "Exo Control is Windows-only. ego lite has no Windows app — use browser_* spaces, not ego-browser.",
 ]
 
@@ -652,6 +680,7 @@ def mcp_instructions() -> str:
         "Page to markdown: {\"op\":\"scrape\",\"url\":\"…\",\"provider\":\"firecrawl|jina\"}. "
         "Cloud browser agent: {\"op\":\"browser_use\",\"task\":\"…\"} (BROWSER_USE_API_KEY). "
         "Page UI: browser_*. Docs: files_convert (engine=markitdown|docling) / files_find / xlsx. "
+        "Pilot: goal / checkpoint / proof / changed / undo / skill_save / skill_run / heal. "
         "Graph: mail_list / todo / onenote / teams / mail_send. git / gh_pr. "
         "Exo is Windows-only; ego lite has no Windows app. "
         "Example: [{\"op\":\"lease_acquire\",\"agent_id\":\"agent\",\"task\":\"demo\",\"ttl_sec\":120},"

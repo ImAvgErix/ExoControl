@@ -102,6 +102,7 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Desk extras** | `xlsx`, `git`, `gh_pr`, `volume`, `winget`, `recycle`, `eventlog`, `window_move`, `browser_network` / `pdf` / `tabs` |
 | **Wave 2** | `rag` / `steel_start` / `slack` / `notion` / `linear` / `pwsh` / `docker` / `hash` / `whoami` / `disk` |
 | **Waves 3–5** | Graph writes, CDP extras, `wiki`/`weather`/`hn`, Jira/Discord/Airtable, `zip`/`sqlite`/`tree`, `which`/`dns`/`lock_pc` |
+| **Pilot** | Original layer: `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal` |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 

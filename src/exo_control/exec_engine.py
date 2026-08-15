@@ -21,6 +21,7 @@ from exo_control import files_ops
 from exo_control import registry_ops
 from exo_control import infra_ops
 from exo_control.ops_catalog import lease_free_ops, lease_required_ops
+from exo_control.pilot_ops import Pilot
 from exo_control.policy import (
     allow_screenshot_on_fail_default,
     deny_browser_eval,
@@ -131,6 +132,8 @@ class ExoExecEngine:
         self._script_launched_pids: List[int] = []
         self._eyes_started_by_lease = False
         self._browser_use_session: Optional[str] = None
+        self._pilot = Pilot()
+        self._skill_depth = 0
 
     def _get_browser(self):
         if self._browser is None:
@@ -301,6 +304,19 @@ class ExoExecEngine:
         tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         op = str(step.get("op") or "").strip().lower().replace("-", "_")
+        work = dict(step)
+        if op == "clipboard_set":
+            try:
+                prev = self.ctrl.clipboard_get()
+                if isinstance(prev, dict):
+                    work["_prev_clipboard"] = prev.get("text") or prev.get("value")
+            except Exception:
+                pass
+        snap = (
+            self._pilot.prepare_undo(op, work)
+            if op in {"files_write", "files_delete", "clipboard_set"}
+            else None
+        )
         step_started = time.perf_counter()
         try:
             # Bound UIA waits only. Playwright browser_* must NOT run under
@@ -310,10 +326,10 @@ class ExoExecEngine:
                 "observe", "compact_observe", "read_ui", "read",
             }:
                 value = self._run_step_bounded(
-                    op, step, timeout_s=float(step.get("timeout", 14.0))
+                    op, work, timeout_s=float(work.get("timeout", 14.0))
                 )
             else:
-                value = self._run_step(op, step)
+                value = self._run_step(op, work)
         except Exception as exc:
             value = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         value = _normalize_result(op, value)
@@ -325,6 +341,17 @@ class ExoExecEngine:
             except Exception:
                 pass
         ok = _step_ok(value)
+        if ok:
+            if snap:
+                self._pilot.push_undo(snap)
+            self._pilot.remember_step(work, op)
+            if op in {
+                "observe", "compact_observe", "read", "read_ui",
+                "eyes", "eyes_read", "look", "glance",
+            }:
+                self._pilot.note_glance(value)
+        else:
+            self._pilot.note_failure(work, op)
         if not ok:
             want_shot = step.get("screenshot_on_fail")
             if want_shot is None:
@@ -379,6 +406,8 @@ class ExoExecEngine:
         released_this_script = False
         self._desktop_refs = {}
         self._script_launched_pids = []
+        if self._skill_depth == 0:
+            self._pilot.reset_script()
         # Keep held lease across execute() calls unless this script acquired and
         # failed mid-way (auto_release_lease), so agents are not stuck.
         for index, step in enumerate(steps):
@@ -459,7 +488,7 @@ class ExoExecEngine:
             (not r.get("ok")) and r.get("phase") != "finally" and not r.get("auto")
             for r in results
         )
-        return {
+        out: Dict[str, Any] = {
             "ok": main_ok,
             "elapsed_ms": round((time.perf_counter() - started) * 1000),
             "completed": main_count,
@@ -470,6 +499,9 @@ class ExoExecEngine:
             "last_error": self._last_error,
             "steps": results,
         }
+        if self._pilot.goal:
+            out["pilot"] = self._pilot.summary()
+        return out
 
     def _lease_token(self, step: Dict[str, Any]) -> Optional[str]:
         token = (
@@ -623,6 +655,57 @@ class ExoExecEngine:
         if not items:
             items = list(self._action_log[-n:])
         return {"ok": True, "count": len(items), "entries": items, "actions": items}
+
+    def _skill_run(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        if self._skill_depth >= 2:
+            return {"ok": False, "error": "skill_run nested too deep", "code": "SKILL_DEPTH"}
+        loaded = self._pilot.skill_load(step)
+        if not loaded.get("ok"):
+            return loaded
+        self._skill_depth += 1
+        try:
+            inner = self.execute(
+                loaded["steps"],
+                stop_on_failure=True,
+                auto_release_lease=False,
+            )
+        finally:
+            self._skill_depth -= 1
+        err = None
+        if not inner.get("ok"):
+            last = inner.get("last_error") or {}
+            err = last.get("error") if isinstance(last, dict) else None
+        return {
+            "ok": bool(inner.get("ok")),
+            "name": loaded.get("name"),
+            "replayed": loaded.get("count"),
+            "completed": inner.get("completed"),
+            "error": err,
+        }
+
+    def _heal(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        if self._pilot.heal_used:
+            return {"ok": False, "error": "already healed this error", "code": "HEAL_USED"}
+        failed = self._pilot.last_failed_step
+        if not failed:
+            return {"ok": False, "error": "nothing to heal", "code": "NOTHING_TO_HEAL"}
+        self._pilot.heal_used = True
+        retry_op = str(failed.get("op") or "")
+        retried = _normalize_result(retry_op, self._run_step(retry_op, failed))
+        if _step_ok(retried):
+            self._last_error = None
+            snap = self._pilot.prepare_undo(retry_op, failed)
+            if snap:
+                self._pilot.push_undo(snap)
+            self._pilot.remember_step(failed, retry_op)
+            return {"ok": True, "retried": retry_op, "result": retried}
+        return {
+            "ok": False,
+            "retried": retry_op,
+            "error": retried.get("error") if isinstance(retried, dict) else "heal retry failed",
+            "code": retried.get("code") if isinstance(retried, dict) else "HEAL_FAILED",
+            "result": retried,
+        }
 
 
     def _require_focus(self, op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -999,6 +1082,30 @@ class ExoExecEngine:
             return ctrl.create_cursor(str(step.get("cursor_id") or step.get("id") or step.get("cursor") or "main"))
         if op in {"list_cursors", "cursors"}:
             return {"ok": True, "cursors": ctrl.list_cursors()}
+        if op in {"goal", "intent"}:
+            return self._pilot.set_goal(step)
+        if op == "checkpoint":
+            return self._pilot.checkpoint(step)
+        if op == "proof":
+            return self._pilot.proof(last_error=self._last_error)
+        if op in {"changed", "what_changed"}:
+            return self._pilot.changed()
+        if op == "undo":
+            out = self._pilot.undo()
+            if out.get("ok") and out.get("restore") and out.get("undid") == "clipboard_set":
+                set_out = ctrl.clipboard_set(str(out.get("text") or ""))
+                if isinstance(set_out, dict):
+                    return {**set_out, "undid": "clipboard_set"}
+                return out
+            return out
+        if op == "skill_save":
+            return self._pilot.skill_save(step)
+        if op == "skill_list":
+            return self._pilot.skill_list()
+        if op in {"skill_run", "replay"}:
+            return self._skill_run(step)
+        if op == "heal":
+            return self._heal(step)
         if op == "status":
             st = ctrl.status() if hasattr(ctrl, "status") else {"ok": True}
             if isinstance(st, dict):
@@ -1017,6 +1124,7 @@ class ExoExecEngine:
                     ego = ego_ops.detect()
                     caps["ego_available"] = bool(ego.get("available"))
                     caps.update(addon_ops.capabilities())
+                    caps["pilot"] = True
             return st
         if op in {"windows", "list_windows"}:
             mon = step.get("monitor")

@@ -76,6 +76,7 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Wave 2: `rag` / `winsearch` / `steel_start` / `search` providers / `slack` / `notion` / `linear`
 - [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
 - [x] Waves 3–5: Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/tree, sys status (no secret dump / UAC / anti-cheat)
+- [x] Pilot (original): `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`
 
 ## Hard stops
 

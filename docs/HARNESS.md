@@ -25,6 +25,7 @@ You control a Windows PC via Exo Control.
 - Compact responses by default; do not dump raw HTML/trees unless verbose.
 - Web facts: search (provider=perplexity|tavily|exa|ddg|serper|brave). Page markdown: scrape (provider=firecrawl|jina). Cloud browser: browser_use (BROWSER_USE_API_KEY). Page UI: browser_*.
 - Docs on disk: files_convert (engine=markitdown|docling) / files_find / xlsx / rag / zip / sqlite. Memory: memory_add / memory_search. History: recall (Screenpipe). Graph: todo / onenote / teams / mail_send / cal_add. git / gh_pr. Wiki/weather/hn stay their own ops. SaaS: slack / notion / linear / jira.
+- Pilot (this is the product): goal / checkpoint / proof / changed / undo / skill_save / skill_run / heal. Not a vendor wrapper.
 - Exo Control is Windows-only. ego lite has no Windows app.
 ```
 
