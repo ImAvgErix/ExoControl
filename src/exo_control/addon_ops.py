@@ -386,5 +386,5 @@ def readiness() -> Dict[str, Any]:
             "firecrawl": {"ok": firecrawl_ops.configured(), "env": "FIRECRAWL_API_KEY"},
             "graph": {"ok": graph_ops.configured(), "env": "MICROSOFT_GRAPH_TOKEN"},
         },
-        "stub": ["stt"],
+        "stub": ["stt", "ocr_win"],
     }

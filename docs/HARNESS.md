@@ -39,6 +39,8 @@ You control a Windows PC via Exo Control.
 | `exo_screenshot` | `aether_screenshot` | Pixels when needed |
 | `exo_help` | `aether_help` | Op catalog + rules |
 
+Aliases (`aether_*`) register only when `EXO_MCP_ALIASES=1`.
+
 `script` accepts: JSON array, JSON string, or `{"steps":[...]}`.
 
 ### Generic MCP config (stdio)
@@ -136,8 +138,10 @@ Or MCP: `exo_help` with optional `query`.
 ## Install once
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
+pip install exo-control
 exo-control doctor
+# fallback:
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 # optional CDP:
 pip install "exo-control[browser]"
 playwright install chromium

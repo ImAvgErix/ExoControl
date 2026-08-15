@@ -71,14 +71,15 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Screenpipe: `recall` / `screen_search` (localhost history)
 - [x] Graph Wave 1: `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (CSV or workbook)
 - [x] Jina via `scrape` `provider=jina`; allowrooted `git`; GitHub `gh_pr`
-- [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`
+- [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `tts`
+- [ ] `stt` and `ocr_win` are stubs (see `ready`)
 - [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
 - [x] Wave 2: `rag` / `winsearch` / `steel_start` / `search` providers / `slack` / `notion` / `linear`
 - [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
 - [x] Waves 3–5: Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/tree, sys status (no secret dump / UAC / anti-cheat)
 - [x] Pilot (original): `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`
 - [x] Stock Windows natives (ctypes/netsh/PowerShell/COM) for volume, lock, wifi, power, recycle, TTS, dialog, dark_mode, idle, ports, Defender status, …
-- [x] Honest `ready` map: what works here vs Windows-native vs needs a key (`stt` stays stub)
+- [x] Honest `ready` map: what works here vs Windows-native vs needs a key (`stt` and `ocr_win` stay stub)
 - [x] Live seat: `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID (not UIA, not RDP)
 
 ## Hard stops
@@ -91,8 +92,8 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 ## Install (library — no installer EXE)
 
 ```bash
-pip install -e .
-# or PYTHONPATH to src
+pip install exo-control
+# fallback: pip install -e .  or  pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 python -m exo_control.slim_mcp_server
 ```
 

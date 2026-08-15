@@ -219,29 +219,16 @@ def tts(step: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def ocr_win(step: Dict[str, Any]) -> Dict[str, Any]:
-    path = str(step.get("path") or step.get("image") or "").replace("'", "''")
+    """Stub like stt. WinRT Recognize is not a reliable ok:true this release."""
+    path = str(step.get("path") or step.get("image") or "").strip()
     if not path:
         return {"ok": False, "error": "ocr_win requires path", "code": "MISSING_PATH"}
-    proc = powershell(
-        f"$p = '{path}'; "
-        "Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction SilentlyContinue; "
-        "$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]; "
-        "try { "
-        "$eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages(); "
-        "if (-not $eng) { 'OCR_UNAVAILABLE'; exit 2 }; "
-        "'OCR_UNAVAILABLE' "
-        "} catch { 'OCR_UNAVAILABLE' }",
-        timeout=20,
-    )
-    text = (proc.stdout or "").strip()
-    if "OCR_UNAVAILABLE" in text or proc.returncode != 0:
-        return {
-            "ok": False,
-            "error": "WinRT OCR not bound; use omni or files_convert",
-            "code": "UNAVAILABLE",
-            "hint": "Install desktop OCR language pack, or call omni / files_convert",
-        }
-    return {"ok": True, "native": True, "text": truncate(text, 2000)}
+    return {
+        "ok": False,
+        "error": "ocr_win has no stock WinRT bind we will pretend works",
+        "code": "UNAVAILABLE",
+        "hint": "Use omni or files_convert; do not invent OCR text",
+    }
 
 
 def stt(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -549,7 +536,7 @@ def fonts(step: Dict[str, Any]) -> Dict[str, Any]:
 
 
 WINDOWS_NATIVE_OPS = (
-    "volume", "recycle", "tts", "ocr_win", "wifi", "power", "print", "dialog",
+    "volume", "recycle", "tts", "wifi", "power", "print", "dialog",
     "lnk", "certs", "winsearch", "lock_pc", "idle", "brightness", "dark_mode",
     "ports", "uptime", "usb", "bluetooth", "printers", "bitlocker", "defender",
     "win_updates", "fonts", "winget", "eventlog",

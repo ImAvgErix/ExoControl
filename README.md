@@ -59,6 +59,8 @@ State lives under `~/.exo/`. Legacy `~/.aether/` is migrated automatically.
 }
 ```
 
+`aether_*` tools register only when `EXO_MCP_ALIASES=1`. Prefer `exo_*`.
+
 Do not set `PYTHONPATH` at a second tree. `exo-control doctor` reports shadowing.
 
 ## Quick script
@@ -107,6 +109,8 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Windows natives** | Stock volume/lock/wifi/power/recycle/TTS/dialog/dark_mode/idle/ports/Defender (no extra pip) |
 | **Live seat** | `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID |
 
+Key-gated rows fail closed; `{"op":"ready"}` is the map; `stt` is a stub.
+
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 
 ## Safety
@@ -124,7 +128,7 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | [AGENTS.md](AGENTS.md) | Drop-in agent instructions |
 | [docs/HARNESS.md](docs/HARNESS.md) | Host install matrix |
 | [docs/LIVE-MODEL.md](docs/LIVE-MODEL.md) | Lease / eyes / hands |
-| [docs/API-STABILITY.md](docs/API-STABILITY.md) | 2.0 public surface |
+| [docs/API-STABILITY.md](docs/API-STABILITY.md) | 2.x public surface |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 
 ## License

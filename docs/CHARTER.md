@@ -45,8 +45,10 @@ Exo Launcher is a first-class target, not the only one. Control must not require
 Exo Control is a **Python package**, not a Windows app installer.
 
 ```bash
-pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
+pip install exo-control
 exo-control doctor
+# fallback:
+pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 ```
 
 There is **no Setup.exe**. Wheels may appear on the GitHub Release; versioning is `pyproject.toml` + git tags.
