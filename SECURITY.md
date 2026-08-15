@@ -36,7 +36,9 @@ Exo Control runs as the logged-in Windows user. It is **not a sandbox**. Anyone 
 | `SKYVERN_API_KEY` | unset | Enables `skyvern` vision tasks |
 | `AGENTQL_API_KEY` | unset | Enables `agentql` page queries |
 | `MEM0_API_KEY` | unset | Sends `memory_*` to Mem0 (else local JSONL under state dir) |
-| `COMPOSIO_API_KEY` / `MICROSOFT_GRAPH_TOKEN` | unset | Enables `composio` / `mail_list` / `cal_next` / `drive_get` |
+| `COMPOSIO_API_KEY` / `MICROSOFT_GRAPH_TOKEN` | unset | Enables `composio` / `mail_list` / `cal_next` / `drive_get` / `todo` / `onenote` / `teams` / `mail_send` / Graph `xlsx` |
+| `JINA_API_KEY` | unset | Optional auth for `read_url` (Jina Reader works without it) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | unset | Enables `gh_pr` |
 | `OMNIPARSER_URL` | unset | Local OmniParser HTTP for `omni` |
 | `EVERYTHING_URL` | `http://127.0.0.1` | Everything HTTP; miss falls back to allowroot walk |
 | `SCREENPIPE_URL` | `http://127.0.0.1:3030` | Screenpipe `recall` (loopback) |
@@ -52,4 +54,4 @@ Desktop hands require an acquired lease. Agents share the machine; they do not o
 
 ## Confirm gates
 
-Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk."
+Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch, `mail_send`, volume set, recycle empty) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk."

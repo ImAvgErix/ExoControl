@@ -58,6 +58,10 @@ Hosted web agent or a managed Chromium you drive with existing `browser_*` ops. 
 {"op": "memory_add", "text": "Prefers dark mode"}
 {"op": "recall", "query": "standup"}
 {"op": "mail_list", "max": 5}
+{"op": "todo"}
+{"op": "read_url", "url": "https://example.com"}
+{"op": "git", "path": "C:/Users/you/.exo/workspace/repo", "action": "status"}
+{"op": "xlsx", "path": "C:/Users/you/.exo/workspace/sheet.csv", "range": "A1:C10"}
 ```
 
 ## Minimal script

@@ -69,6 +69,10 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Memory: `memory_add` / `memory_search` (local JSONL; Mem0 if keyed)
 - [x] Composio / Graph: `composio`, `mail_list`, `cal_next`, `drive_get`
 - [x] Screenpipe: `recall` / `screen_search` (localhost history)
+- [x] Graph Wave 1: `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (CSV or workbook)
+- [x] Jina `read_url`; allowrooted `git`; GitHub `gh_pr`
+- [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `ocr_win` / `stt` / `tts`
+- [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
 
 ## Hard stops
 

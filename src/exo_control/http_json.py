@@ -7,6 +7,35 @@ import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
 
+def request_text(
+    method: str,
+    url: str,
+    headers: Dict[str, str],
+    timeout: float,
+    max_bytes: int = 200_000,
+) -> Tuple[int, str, str]:
+    """GET/HEAD-style text body (Jina markdown, etc.)."""
+    req = urllib.request.Request(url, data=None, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw_b = resp.read(max_bytes + 1)
+            status = int(getattr(resp, "status", 200) or 200)
+    except urllib.error.HTTPError as exc:
+        raw_b = exc.read(max_bytes + 1) if exc.fp else b""
+        text = raw_b.decode("utf-8", errors="replace")
+        return int(exc.code), text, text
+    except urllib.error.URLError as exc:
+        return 0, "", str(exc.reason or exc)
+    except TimeoutError as exc:
+        return 0, "", str(exc)
+    truncated = len(raw_b) > max_bytes
+    raw_b = raw_b[:max_bytes]
+    text = raw_b.decode("utf-8", errors="replace")
+    if truncated:
+        text = text[: max(0, max_bytes - 3)] + "..."
+    return status, text, text
+
+
 def request_json(
     method: str,
     url: str,

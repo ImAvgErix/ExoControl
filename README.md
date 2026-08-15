@@ -98,7 +98,8 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Web extract** | Firecrawl `scrape` / `crawl` / `site_map`; Stagehand `browser_act`; Skyvern; AgentQL |
 | **Docs / find** | `files_convert` (MarkItDown), `files_find` (Everything or walk) |
 | **Memory / history** | `memory_add` / `memory_search` (local or Mem0); `recall` (Screenpipe) |
-| **Mail / calendar** | `mail_list` / `cal_next` / `drive_get` (Graph or Composio) |
+| **Mail / calendar** | `mail_list` / `cal_next` / `drive_get` / `todo` / `onenote` / `teams` / `mail_send` (Graph or Composio) |
+| **Desk extras** | `xlsx`, `read_url`, `git`, `gh_pr`, `volume`, `winget`, `recycle`, `eventlog`, `window_move`, `browser_network` / `pdf` / `tabs` |
 
 `{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
 

@@ -1372,6 +1372,43 @@ class ExoExecEngine:
             return browser.evaluate(str(step.get("js", "")), step.get("space_id"))
         if op == "browser_close_space":
             return browser.close_space(str(step.get("space_id", "")))
+        if op in {"browser_network", "browser_har"}:
+            if hasattr(browser, "network_log"):
+                return browser.network_log(
+                    step.get("space_id"),
+                    int(step.get("max") or step.get("limit") or 40),
+                )
+            return {"ok": False, "error": "browser_network not available"}
+        if op == "browser_downloads":
+            if hasattr(browser, "downloads"):
+                return browser.downloads(
+                    step.get("space_id"),
+                    int(step.get("max") or step.get("limit") or 20),
+                )
+            return {"ok": False, "error": "browser_downloads not available"}
+        if op in {"browser_pdf", "browser_print"}:
+            path = str(step.get("path") or step.get("out") or "").strip()
+            if not path:
+                return {"ok": False, "error": "browser_pdf requires path"}
+            ok, resolved, outside = files_ops._resolve_under_roots(path)
+            if not ok:
+                return {"ok": False, "error": resolved}
+            denied = files_ops._outside_denied(
+                "browser_pdf", resolved, parse_confirm(step.get("confirm", False)),
+            ) if outside else None
+            if denied:
+                return denied
+            if hasattr(browser, "pdf"):
+                return browser.pdf(resolved, step.get("space_id"))
+            return {"ok": False, "error": "browser_pdf not available"}
+        if op in {"browser_tabs", "browser_switch"}:
+            if hasattr(browser, "tabs"):
+                return browser.tabs(
+                    space_id=step.get("space_id"),
+                    index=step.get("index"),
+                    url=step.get("url") or step.get("href"),
+                )
+            return {"ok": False, "error": "browser_tabs not available"}
 
         if op in {"screenshot", "shot"}:
             # path => write file; otherwise return compact base64 JPEG via engine helper
@@ -1614,6 +1651,7 @@ class ExoExecEngine:
             "window_max", "window_maximize",
             "window_restore",
             "window_close",
+            "window_move", "window_resize", "window_snap",
             "window", "window_state",
         }:
             if step.get("title"):
@@ -1638,6 +1676,17 @@ class ExoExecEngine:
                     hwnd_i,
                     discard_unsaved=bool(step.get("discard_unsaved", step.get("discard", True))),
                     wait_gone=float(step.get("wait_gone", step.get("timeout", 2.5))),
+                )
+            if op in {"window_move", "window_resize", "window_snap"}:
+                return ctrl.window_move(
+                    hwnd_i,
+                    x=step.get("x"),
+                    y=step.get("y"),
+                    w=step.get("w") or step.get("width"),
+                    h=step.get("h") or step.get("height"),
+                    snap=step.get("snap") or step.get("edge") or (
+                        "left" if op == "window_snap" and step.get("side") else step.get("side")
+                    ),
                 )
             action = str(step.get("action") or step.get("state") or "state").lower()
             if action in {"minimize", "min"}:

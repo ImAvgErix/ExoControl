@@ -56,7 +56,7 @@ Web facts (lease-free): `{"op":"search","query":["…","…"]}` with `PERPLEXITY
 
 Cloud web agent: `{"op":"browser_use","task":"…"}` with `BROWSER_USE_API_KEY`. Cloud Chromium: `browser_use_start` then `browser_connect` (`provider=browser-use` or the returned `cdp_url`). Local page UI stays `browser_*`. Stagehand `browser_act` / AgentQL `browser_query` / Skyvern `skyvern` are lease-free HTTP, not CDP hands.
 
-Docs on disk: `files_convert` / `files_find`. Facts: `memory_add` / `memory_search`. Screen history: `recall`. Mail/calendar: `mail_list` / `cal_next` (Graph or Composio).
+Docs on disk: `files_convert` / `files_find` / `xlsx`. URL markdown: `read_url`. Facts: `memory_add` / `memory_search`. Screen history: `recall`. Mail/calendar/To Do: `mail_list` / `cal_next` / `todo` / `onenote` / `teams` (Graph). `mail_send` needs `confirm=true`. Allowrooted `git`; `gh_pr` with `GITHUB_TOKEN`.
 
 Exo Control is **Windows-only**. ego lite has no Windows app — do not call `ego-browser`. `{"op":"ego"}` reports that.
 

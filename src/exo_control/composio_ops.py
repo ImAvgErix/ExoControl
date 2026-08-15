@@ -28,7 +28,7 @@ def composio_key() -> Optional[str]:
 
 
 def graph_token() -> Optional[str]:
-    return env_key("MICROSOFT_GRAPH_TOKEN", "EXO_GRAPH_TOKEN", "AZURE_TOKEN")
+    return env_key("MICROSOFT_GRAPH_TOKEN", "EXO_GRAPH_TOKEN", "AZURE_TOKEN", "GRAPH_TOKEN")
 
 
 def configured() -> bool:

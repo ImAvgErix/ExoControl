@@ -15,6 +15,7 @@ Everything practical for higher accuracy + speed:
 
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -459,6 +460,76 @@ class SmartController:
 
     def window_restore(self, hwnd: Optional[int] = None) -> Dict[str, Any]:
         return self._window_show("restore", hwnd=hwnd, cmd=9)  # SW_RESTORE
+
+    def window_move(
+        self,
+        hwnd: Optional[int] = None,
+        x: Any = None,
+        y: Any = None,
+        w: Any = None,
+        h: Any = None,
+        snap: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Move / resize / snap via SetWindowPos. Linux callers get WINDOWS_ONLY."""
+        handle = self._hwnd_for_window_op(hwnd)
+        if handle is None:
+            return {"ok": False, "error": "no focused window"}
+        try:
+            import ctypes
+            from ctypes import wintypes
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "code": "WINDOWS_ONLY"}
+        if sys.platform != "win32":
+            return {"ok": False, "error": "window_move is Windows-only", "code": "WINDOWS_ONLY"}
+        user32 = ctypes.windll.user32
+        SWP_NOZORDER = 0x0004
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_SHOWWINDOW = 0x0040
+        flags = SWP_NOZORDER | SWP_SHOWWINDOW
+        left = int(x) if x is not None else 0
+        top = int(y) if y is not None else 0
+        width = int(w) if w is not None else 0
+        height = int(h) if h is not None else 0
+        edge = str(snap or "").lower().strip()
+        if edge in {"left", "right", "top", "bottom"}:
+            rect = wintypes.RECT()
+            if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):  # SPI_GETWORKAREA
+                work_w = int(rect.right - rect.left)
+                work_h = int(rect.bottom - rect.top)
+                if edge == "left":
+                    left, top, width, height = int(rect.left), int(rect.top), work_w // 2, work_h
+                elif edge == "right":
+                    left, top, width, height = int(rect.left) + work_w // 2, int(rect.top), work_w // 2, work_h
+                elif edge == "top":
+                    left, top, width, height = int(rect.left), int(rect.top), work_w, work_h // 2
+                else:
+                    left, top, width, height = int(rect.left), int(rect.top) + work_h // 2, work_w, work_h // 2
+            else:
+                return {"ok": False, "error": "work area unavailable"}
+        else:
+            if x is None and y is None:
+                flags |= SWP_NOMOVE
+            if w is None and h is None:
+                flags |= SWP_NOSIZE
+            if edge in {"max", "maximize"}:
+                return self.window_max(handle)
+            if edge in {"min", "minimize"}:
+                return self.window_min(handle)
+        ok = bool(user32.SetWindowPos(int(handle), 0, left, top, width, height, flags))
+        if not ok:
+            return {"ok": False, "error": "SetWindowPos failed", "window_id": int(handle)}
+        return {
+            "ok": True,
+            "moved": True,
+            "window_id": int(handle),
+            "x": left,
+            "y": top,
+            "w": width,
+            "h": height,
+            "snap": edge or None,
+            "window": self.window_state(handle),
+        }
 
     def _window_alive(self, hwnd: Optional[int]) -> bool:
         if hwnd is None:

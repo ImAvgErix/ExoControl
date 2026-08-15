@@ -126,6 +126,51 @@ OPS: List[Dict[str, Any]] = [
     {"op": "recall", "aliases": ["screen_search", "screenpipe"], "lease": False,
      "purpose": "Search Screenpipe local screen/audio history",
      "fields": ["query?", "app?", "max?"]},
+    {"op": "xlsx", "aliases": ["excel", "sheet"], "lease": False,
+     "purpose": "Read CSV/TSV range under allowroots, or Graph workbook range",
+     "fields": ["path?", "range?", "workbook?", "sheet?"]},
+    {"op": "todo", "aliases": ["todo_list", "ms_todo"], "lease": False,
+     "purpose": "Microsoft To Do lists/tasks (MICROSOFT_GRAPH_TOKEN)",
+     "fields": ["list?", "max?"]},
+    {"op": "onenote", "aliases": ["onenote_list"], "lease": False,
+     "purpose": "OneNote notebooks/sections (Graph token)",
+     "fields": ["notebook?", "max?"]},
+    {"op": "teams", "aliases": ["teams_list"], "lease": False,
+     "purpose": "Joined Teams or chats (Graph token)",
+     "fields": ["kind?", "max?"]},
+    {"op": "mail_send", "aliases": ["send_mail"], "lease": False,
+     "purpose": "Send mail via Graph (confirm=true)",
+     "fields": ["to", "subject?", "body?", "confirm"]},
+    {"op": "volume", "aliases": ["vol", "mute"], "lease": False,
+     "purpose": "Get/set system volume (set/mute needs confirm=true)",
+     "fields": ["level?", "mute?", "confirm?"]},
+    {"op": "winget", "aliases": ["pkg_search"], "lease": False,
+     "purpose": "Search/list winget packages (Windows)",
+     "fields": ["query?", "action?"]},
+    {"op": "recycle", "aliases": ["recycle_bin", "trash"], "lease": False,
+     "purpose": "Recycle bin list; empty needs confirm=true",
+     "fields": ["action?", "confirm?"]},
+    {"op": "eventlog", "aliases": ["events"], "lease": False,
+     "purpose": "Compact Application/System event log (Windows)",
+     "fields": ["log?", "max?"]},
+    {"op": "ocr_win", "aliases": ["win_ocr"], "lease": False,
+     "purpose": "WinRT OCR on an allowrooted image (Windows)",
+     "fields": ["path?"]},
+    {"op": "stt", "aliases": ["speech_to_text"], "lease": False,
+     "purpose": "Windows Speech recognition (Windows)",
+     "fields": []},
+    {"op": "tts", "aliases": ["speak", "sapi"], "lease": False,
+     "purpose": "SAPI speak (Windows)",
+     "fields": ["text"]},
+    {"op": "read_url", "aliases": ["jina", "url_md"], "lease": False,
+     "purpose": "URL → markdown via Jina Reader (optional JINA_API_KEY)",
+     "fields": ["url", "verbose?"]},
+    {"op": "git", "aliases": ["git_status"], "lease": False,
+     "purpose": "Allowrooted git status/diff/log",
+     "fields": ["path", "action?"]},
+    {"op": "gh_pr", "aliases": ["github_pr", "pr_status"], "lease": False,
+     "purpose": "GitHub PR status (GITHUB_TOKEN)",
+     "fields": ["repo", "number?"]},
     {"op": "env_get", "aliases": [], "lease": False, "purpose": "Env var", "fields": ["name"]},
     {"op": "env_list", "aliases": [], "lease": False, "purpose": "Env var names (values via env_get)", "fields": ["max?"]},
     {"op": "tasks_list", "aliases": [], "lease": False, "purpose": "Scheduled tasks (compact)", "fields": ["max?"]},
@@ -172,6 +217,9 @@ OPS: List[Dict[str, Any]] = [
     {"op": "window_restore", "aliases": [], "lease": True, "purpose": "Restore", "fields": ["title?", "hwnd?"]},
     {"op": "window_close", "aliases": [], "lease": True,
      "purpose": "Close window (default: Don't save on unsaved prompts)", "fields": ["title?", "hwnd?", "discard_unsaved?"]},
+    {"op": "window_move", "aliases": ["window_resize", "window_snap"], "lease": True,
+     "purpose": "Move/resize/snap the focused window (SetWindowPos)",
+     "fields": ["title?", "hwnd?", "x?", "y?", "w?", "h?", "snap?"]},
     {"op": "clipboard_set", "aliases": [], "lease": True, "purpose": "Set clipboard text", "fields": ["text"]},
     {"op": "clipboard_image_set", "aliases": ["clipboard_set_image"], "lease": True,
      "purpose": "Put image file on clipboard", "fields": ["path"]},
@@ -229,6 +277,18 @@ OPS: List[Dict[str, Any]] = [
      "purpose": "Evaluate JS (confirm required; EXO_DENY_BROWSER_EVAL=1 hard-denies)",
      "fields": ["js", "space_id?", "confirm"]},
     {"op": "browser_close_space", "aliases": [], "lease": True, "purpose": "Close space", "fields": ["space_id"]},
+    {"op": "browser_network", "aliases": ["browser_har"], "lease": True,
+     "purpose": "Recent page request log (HAR-lite)",
+     "fields": ["space_id?", "max?"]},
+    {"op": "browser_downloads", "aliases": [], "lease": True,
+     "purpose": "Recent browser downloads",
+     "fields": ["space_id?", "max?"]},
+    {"op": "browser_pdf", "aliases": ["browser_print"], "lease": True,
+     "purpose": "Print the page to an allowrooted PDF",
+     "fields": ["path", "space_id?"]},
+    {"op": "browser_tabs", "aliases": ["browser_switch"], "lease": True,
+     "purpose": "List or switch browser spaces/tabs",
+     "fields": ["space_id?", "index?", "url?"]},
     {"op": "cursor_exec", "aliases": ["cursor_run"], "lease": True,
      "purpose": "Run steps on a named virtual cursor", "fields": ["cursor_id?", "steps"]},
     {"op": "create_cursor", "aliases": ["cursor_create"], "lease": True,
@@ -258,7 +318,9 @@ HARNESS_RULES: List[str] = [
     "scrape/crawl/site_map = Firecrawl. files_convert = MarkItDown. files_find = Everything or walk.",
     "stagehand / browser_act and agentql / browser_query are lease-free HTTP (not local CDP hands).",
     "skyvern = vision forms. omni = screenshot parse. recall = Screenpipe. memory_* = local/Mem0.",
-    "mail_list / cal_next / drive_get = Graph or Composio. Mutating Composio actions need confirm=true.",
+    "mail_list / cal_next / drive_get / todo / onenote / teams = Graph. mail_send needs confirm=true.",
+    "read_url = Jina markdown. git = allowrooted status/diff. gh_pr = GitHub API. xlsx = local CSV or Graph.",
+    "volume/winget/recycle/eventlog/ocr_win/stt/tts are Windows desk ops (set/empty need confirm).",
     "Exo Control is Windows-only. ego lite has no Windows app — use browser_* spaces, not ego-browser.",
 ]
 
@@ -304,6 +366,16 @@ def known_ops() -> frozenset:
     for entry in OPS:
         names.update(_names(entry))
     return frozenset(names)
+
+
+def get_op(name: str) -> Optional[Dict[str, Any]]:
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    for entry in OPS:
+        if key in {n.lower() for n in _names(entry)}:
+            return entry
+    return None
 
 
 def list_ops(*, query: Optional[str] = None, detail: bool = False, compact: Optional[bool] = None) -> Dict[str, Any]:
@@ -362,7 +434,8 @@ def mcp_instructions() -> str:
         "Web facts: {\"op\":\"search\",\"query\":[\"…\",\"…\"]} (PERPLEXITY_API_KEY). "
         "Page to markdown: {\"op\":\"scrape\",\"url\":\"…\"} (FIRECRAWL_API_KEY). "
         "Cloud browser agent: {\"op\":\"browser_use\",\"task\":\"…\"} (BROWSER_USE_API_KEY). "
-        "Page UI: browser_*. Docs: files_convert / files_find. Memory: memory_add / memory_search. "
+        "Page UI: browser_*. Docs: files_convert / files_find / xlsx / read_url. "
+        "Graph: mail_list / todo / onenote / teams / mail_send. git / gh_pr. "
         "Exo is Windows-only; ego lite has no Windows app. "
         "Example: [{\"op\":\"lease_acquire\",\"agent_id\":\"agent\",\"task\":\"demo\",\"ttl_sec\":120},"
         "{\"op\":\"launch\",\"app\":\"notepad\"},{\"op\":\"type\",\"text\":\"hi\"},{\"op\":\"lease_release\"}]. "
