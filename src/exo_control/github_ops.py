@@ -1,10 +1,11 @@
 """GitHub pull-request status (HTTP). Auth: ``GITHUB_TOKEN`` / ``GH_TOKEN``."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 from exo_control.http_json import clip_int, env_key, error_from_http, request_json, timeout_of, user_agent
+from exo_control.policy import parse_confirm
 
 _REQUEST_JSON = None
 API = "https://api.github.com"
@@ -95,3 +96,65 @@ def gh_pr(step: Dict[str, Any]) -> Dict[str, Any]:
                 "html_url": item.get("html_url"),
             })
     return {"ok": True, "provider": "github", "repo": repo, "prs": prs, "count": len(prs)}
+
+
+def _issue_rows(parsed: Any) -> List[Dict[str, Any]]:
+    if isinstance(parsed, list):
+        items = parsed
+    elif isinstance(parsed, dict):
+        items = parsed.get("value") or parsed.get("items") or parsed.get("issues") or []
+    else:
+        items = []
+    rows = []
+    for item in items:
+        if isinstance(item, dict):
+            rows.append({
+                "number": item.get("number"),
+                "title": item.get("title"),
+                "state": item.get("state"),
+                "html_url": item.get("html_url"),
+            })
+    return rows
+
+
+def gh_issue(step: Dict[str, Any]) -> Dict[str, Any]:
+    token = api_key()
+    if not token:
+        return {
+            "ok": False,
+            "error": "gh_issue requires GITHUB_TOKEN",
+            "code": "AUTHENTICATION",
+            "hint": "export GITHUB_TOKEN or GH_TOKEN",
+        }
+    repo = _repo_of(step)
+    if not repo or "/" not in repo:
+        return {"ok": False, "error": "gh_issue requires repo=owner/name", "code": "MISSING_REPO"}
+    title = str(step.get("title") or "").strip()
+    if title:
+        if not parse_confirm(step.get("confirm", False)):
+            return {"ok": False, "error": "gh_issue create requires confirm=true", "code": "CONFIRM_REQUIRED"}
+        status, parsed, raw = _call(
+            "POST",
+            f"{API}/repos/{quote(repo, safe='/')}/issues",
+            _headers(token),
+            {"title": title, "body": str(step.get("body") or step.get("text") or "")},
+            timeout_of(step),
+        )
+        if status not in {200, 201}:
+            return error_from_http(status, parsed, raw, what="gh_issue")
+        return {"ok": True, "provider": "github", "repo": repo, "issue": {
+            "number": parsed.get("number"), "title": parsed.get("title"), "html_url": parsed.get("html_url"),
+        }}
+    top = clip_int(step.get("max") or 10, 10, 1, 30)
+    state = str(step.get("state") or "open")
+    status, parsed, raw = _call(
+        "GET",
+        f"{API}/repos/{quote(repo, safe='/')}/issues?state={quote(state)}&per_page={top}",
+        _headers(token),
+        None,
+        timeout_of(step),
+    )
+    if status != 200:
+        return error_from_http(status, parsed, raw, what="gh_issue")
+    issues = _issue_rows(parsed)
+    return {"ok": True, "provider": "github", "repo": repo, "issues": issues, "count": len(issues)}

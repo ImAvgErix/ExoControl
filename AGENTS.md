@@ -56,7 +56,7 @@ Web facts (lease-free): `{"op":"search","query":["…","…"]}` with `PERPLEXITY
 
 Cloud web agent: `{"op":"browser_use","task":"…"}` with `BROWSER_USE_API_KEY`. Cloud Chromium: `browser_use_start` then `browser_connect` (`provider=browser-use` or the returned `cdp_url`). Local page UI stays `browser_*`. Stagehand `browser_act` / AgentQL `browser_query` / Skyvern `skyvern` are lease-free HTTP, not CDP hands.
 
-Docs on disk: `files_convert` / `files_find` / `xlsx` / `docling` / `rag`. URL markdown: `read_url`. Facts: `memory_add` / `memory_search`. Screen history: `recall`. Mail/calendar/To Do: `mail_list` / `cal_next` / `todo` / `onenote` / `teams` (Graph). `mail_send` needs `confirm=true`. Allowrooted `git`; `gh_pr` with `GITHUB_TOKEN`. Extra search: `tavily` / `exa`. SaaS: `slack` / `notion` / `linear` (posts need confirm). Shells: `pwsh` / `wsl` / `docker` (exec/run need confirm).
+Docs on disk: `files_convert` / `files_find` / `xlsx` / `docling` / `rag` / `zip` / `sqlite` / `tree`. URL markdown: `read_url`. Facts: `memory_add` / `memory_search`. Screen history: `recall`. Mail/calendar/To Do: `mail_list` / `cal_next` / `todo` / `onenote` / `teams` (Graph). Writes (`mail_send` / `cal_add` / `todo_add` / `drive_put`) need `confirm=true`. Allowrooted `git`; `gh_pr` / `gh_issue` with `GITHUB_TOKEN`. Extra search: `tavily` / `exa` / `ddg` / `wiki` / `hn`. SaaS: `slack` / `notion` / `linear` / `jira` / `discord` (posts need confirm). Shells: `pwsh` / `wsl` / `docker` (exec/run need confirm).
 
 Exo Control is **Windows-only**. ego lite has no Windows app — do not call `ego-browser`. `{"op":"ego"}` reports that.
 

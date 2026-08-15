@@ -65,6 +65,9 @@ Hosted web agent or a managed Chromium you drive with existing `browser_*` ops. 
 {"op": "rag", "query": "Q3 forecast"}
 {"op": "tavily", "query": "rust async runtimes"}
 {"op": "hash", "path": "C:/Users/you/.exo/workspace/a.bin"}
+{"op": "ddg", "query": "rust async"}
+{"op": "cal_add", "subject": "Standup", "confirm": true}
+{"op": "sqlite", "path": "C:/Users/you/.exo/workspace/app.db", "sql": "select 1"}
 ```
 
 ## Minimal script

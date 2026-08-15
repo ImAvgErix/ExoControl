@@ -77,6 +77,7 @@ class BrowserEngine:
         self._started = False
         self._network: List[Dict[str, Any]] = []
         self._downloads: List[Dict[str, Any]] = []
+        self._console: List[Dict[str, Any]] = []
 
     async def start(self) -> None:
         if self._started:
@@ -843,6 +844,17 @@ class BrowserEngine:
             except Exception:
                 pass
 
+        def on_console(msg: Any) -> None:
+            try:
+                self._console.append({
+                    "type": getattr(msg, "type", "log"),
+                    "text": getattr(msg, "text", ""),
+                })
+                if len(self._console) > 120:
+                    del self._console[:60]
+            except Exception:
+                pass
+
         def on_download(dl: Any) -> None:
             try:
                 self._downloads.append({
@@ -858,6 +870,7 @@ class BrowserEngine:
             page.on("request", on_request)
             page.on("response", on_response)
             page.on("download", on_download)
+            page.on("console", on_console)
         except Exception:
             pass
 
@@ -934,6 +947,115 @@ class BrowserEngine:
                     active = row
                     break
         return {"ok": True, "tabs": rows, "active": active}
+
+    async def back(self, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.go_back()
+        return {"ok": True, "url": space.page.url, "space_id": space.id}
+
+    async def forward(self, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.go_forward()
+        return {"ok": True, "url": space.page.url, "space_id": space.id}
+
+    async def reload(self, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.reload()
+        return {"ok": True, "reloaded": True, "url": space.page.url, "space_id": space.id}
+
+    async def select(self, selector: str, value: Any, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        await space.page.select_option(selector, str(value))
+        return {"ok": True, "selector": selector, "value": value}
+
+    async def upload(self, selector: str, path: str, space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        loc = space.page.locator(selector)
+        await loc.set_input_files(path)
+        return {"ok": True, "selector": selector, "path": path}
+
+    async def page_dialog(
+        self,
+        action: str = "accept",
+        text: Optional[str] = None,
+        space_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        act = str(action or "accept").lower()
+
+        def _on_dialog(dialog: Any) -> None:
+            try:
+                if act in {"dismiss", "cancel"}:
+                    dialog.dismiss()
+                else:
+                    dialog.accept(text or "")
+            except Exception:
+                pass
+
+        space.page.once("dialog", _on_dialog)
+        return {"ok": True, "action": act, "armed": True}
+
+    async def storage(self, kind: str = "local", space_id: Optional[str] = None) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        which = "sessionStorage" if str(kind).lower().startswith("session") else "localStorage"
+        items = await space.page.evaluate(
+            f"() => Object.fromEntries(Object.keys({which}).map(k => [k, {which}.getItem(k)]))"
+        )
+        return {"ok": True, "kind": "session" if which == "sessionStorage" else "local", "items": items or {}}
+
+    async def cookies(self, space_id: Optional[str] = None, include_values: bool = False) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        raw = []
+        try:
+            raw = await space.context.cookies()
+        except Exception:
+            try:
+                raw = await space.page.context.cookies()
+            except Exception:
+                raw = []
+        rows = []
+        for item in raw or []:
+            if not isinstance(item, dict):
+                continue
+            row = {
+                "name": item.get("name"),
+                "domain": item.get("domain"),
+                "path": item.get("path"),
+                "httpOnly": item.get("httpOnly"),
+                "secure": item.get("secure"),
+            }
+            if include_values:
+                row["value"] = item.get("value")
+            rows.append(row)
+        return {"ok": True, "cookies": rows[:80], "count": len(rows)}
+
+    async def console_log(self, space_id: Optional[str] = None, max_items: int = 40) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        self._hook_page(space.page)
+        n = max(1, min(120, int(max_items or 40)))
+        return {"ok": True, "messages": list(self._console[-n:]), "count": min(len(self._console), n)}
+
+    async def viewport(
+        self,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        space_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        await self.ensure_started()
+        space = self._get_space(space_id)
+        if width and height:
+            await space.page.set_viewport_size({"width": int(width), "height": int(height)})
+        size = space.page.viewport_size or {"width": width, "height": height}
+        return {"ok": True, "width": size.get("width"), "height": size.get("height")}
 
     async def close_space(self, space_id: str) -> Dict[str, Any]:
         if space_id == "default":
@@ -1106,6 +1228,36 @@ class BrowserEngineSync:
 
     def tabs(self, space_id: Optional[str] = None, index: Optional[int] = None, url: Optional[str] = None):
         return self._run(self._engine.tabs(space_id=space_id, index=index, url=url))
+
+    def back(self, space_id: Optional[str] = None):
+        return self._run(self._engine.back(space_id))
+
+    def forward(self, space_id: Optional[str] = None):
+        return self._run(self._engine.forward(space_id))
+
+    def reload(self, space_id: Optional[str] = None):
+        return self._run(self._engine.reload(space_id))
+
+    def select(self, selector: str, value: Any, space_id: Optional[str] = None):
+        return self._run(self._engine.select(selector, value, space_id))
+
+    def upload(self, selector: str, path: str, space_id: Optional[str] = None):
+        return self._run(self._engine.upload(selector, path, space_id))
+
+    def page_dialog(self, action: str = "accept", text: Optional[str] = None, space_id: Optional[str] = None):
+        return self._run(self._engine.page_dialog(action, text, space_id))
+
+    def storage(self, kind: str = "local", space_id: Optional[str] = None):
+        return self._run(self._engine.storage(kind, space_id))
+
+    def cookies(self, space_id: Optional[str] = None, include_values: bool = False):
+        return self._run(self._engine.cookies(space_id, include_values))
+
+    def console_log(self, space_id: Optional[str] = None, max_items: int = 40):
+        return self._run(self._engine.console_log(space_id, max_items))
+
+    def viewport(self, width: Optional[int] = None, height: Optional[int] = None, space_id: Optional[str] = None):
+        return self._run(self._engine.viewport(width, height, space_id))
 
     def stop(self):
         try:

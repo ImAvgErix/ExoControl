@@ -45,6 +45,14 @@ Exo Control runs as the logged-in Windows user. It is **not a sandbox**. Anyone 
 | `SLACK_BOT_TOKEN` / `SLACK_TOKEN` | unset | Enables `slack` |
 | `NOTION_API_KEY` | unset | Enables `notion` |
 | `LINEAR_API_KEY` | unset | Enables `linear` |
+| `JIRA_BASE` / `JIRA_EMAIL` / `JIRA_API_TOKEN` | unset | Enables `jira` |
+| `DISCORD_BOT_TOKEN` | unset | Enables `discord` |
+| `AIRTABLE_API_KEY` | unset | Enables `airtable` |
+| `TRELLO_KEY` / `TRELLO_TOKEN` | unset | Enables `trello` |
+| `ASANA_ACCESS_TOKEN` | unset | Enables `asana` |
+| `TELEGRAM_BOT_TOKEN` | unset | Enables `telegram` |
+| `SERPER_API_KEY` | unset | Enables `serper` |
+| `BRAVE_API_KEY` | unset | Enables `brave` |
 | `OMNIPARSER_URL` | unset | Local OmniParser HTTP for `omni` |
 | `EVERYTHING_URL` | `http://127.0.0.1` | Everything HTTP; miss falls back to allowroot walk |
 | `SCREENPIPE_URL` | `http://127.0.0.1:3030` | Screenpipe `recall` (loopback) |
@@ -60,4 +68,4 @@ Desktop hands require an acquired lease. Agents share the machine; they do not o
 
 ## Confirm gates
 
-Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch, `mail_send`, volume set, recycle empty, Slack post, `pwsh`, WSL exec, docker run/rm, `print`, `dialog`, power sleep, lnk create) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk."
+Destructive ops (kill process, registry write, service start/stop/restart, recursive wipe, `browser_eval`, shell/script launch, `mail_send` / `mail_reply` / `cal_add` / `todo_add` / `drive_put`, volume set, recycle empty, Slack/Discord/Telegram post, `pwsh`, WSL exec, docker run/rm, `print`, `dialog`, power sleep, lnk create, unzip, sqlite writes, `lock_pc`, cookie values) require `confirm=true`. Denies leave an audit line. Confirm never means "entire disk." No LSASS dump, UAC bypass, anti-cheat kill, or captcha farms.

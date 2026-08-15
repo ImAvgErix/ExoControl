@@ -274,3 +274,132 @@ def xlsx(step: Dict[str, Any]) -> Dict[str, Any]:
     if token:
         return {"ok": False, "error": "xlsx requires path or workbook=", "code": "MISSING_PATH"}
     return {"ok": False, "error": "xlsx requires path (csv) or MICROSOFT_GRAPH_TOKEN + workbook", "code": "MISSING_PATH"}
+
+
+def cal_add(step: Dict[str, Any]) -> Dict[str, Any]:
+    token = graph_token()
+    if not token:
+        return _auth_denied("cal_add")
+    if not parse_confirm(step.get("confirm", False)):
+        return {"ok": False, "error": "cal_add requires confirm=true", "code": "CONFIRM_REQUIRED"}
+    subject = str(step.get("subject") or step.get("title") or "").strip()
+    if not subject:
+        return {"ok": False, "error": "cal_add requires subject", "code": "MISSING_SUBJECT"}
+    start = str(step.get("start") or step.get("start_at") or "")
+    end = str(step.get("end") or step.get("end_at") or "")
+    payload: Dict[str, Any] = {"subject": subject}
+    if start:
+        payload["start"] = {"dateTime": start, "timeZone": str(step.get("tz") or "UTC")}
+    if end:
+        payload["end"] = {"dateTime": end, "timeZone": str(step.get("tz") or "UTC")}
+    if step.get("body"):
+        payload["body"] = {"contentType": "Text", "content": str(step.get("body"))}
+    status, parsed, raw = _call("POST", f"{GRAPH_BASE}/me/events", _headers(token), payload, timeout_of(step))
+    if status not in {200, 201}:
+        return error_from_http(status, parsed, raw, what="cal_add")
+    return {"ok": True, "provider": "microsoft-graph", "id": parsed.get("id"), "subject": subject}
+
+
+def todo_add(step: Dict[str, Any]) -> Dict[str, Any]:
+    token = graph_token()
+    if not token:
+        return _auth_denied("todo_add")
+    if not parse_confirm(step.get("confirm", False)):
+        return {"ok": False, "error": "todo_add requires confirm=true", "code": "CONFIRM_REQUIRED"}
+    title = str(step.get("title") or step.get("text") or step.get("task") or "").strip()
+    list_id = str(step.get("list") or step.get("list_id") or "").strip()
+    if not title or not list_id:
+        return {"ok": False, "error": "todo_add requires title and list", "code": "MISSING_FIELDS"}
+    status, parsed, raw = _call(
+        "POST",
+        f"{GRAPH_BASE}/me/todo/lists/{quote(list_id)}/tasks",
+        _headers(token),
+        {"title": title},
+        timeout_of(step),
+    )
+    if status not in {200, 201}:
+        return error_from_http(status, parsed, raw, what="todo_add")
+    return {"ok": True, "provider": "microsoft-graph", "id": parsed.get("id"), "title": title, "list": list_id}
+
+
+def contacts(step: Dict[str, Any]) -> Dict[str, Any]:
+    token = graph_token()
+    if not token:
+        return _auth_denied("contacts")
+    top = clip_int(step.get("max") or 20, 20, 1, 50)
+    status, parsed, raw = _call(
+        "GET", f"{GRAPH_BASE}/me/contacts?$top={top}&$select=displayName,emailAddresses,id",
+        _headers(token), None, timeout_of(step),
+    )
+    if status != 200:
+        return error_from_http(status, parsed, raw, what="contacts")
+    rows = []
+    for item in _value_rows(parsed):
+        emails = item.get("emailAddresses") or []
+        addr = ""
+        if emails and isinstance(emails[0], dict):
+            addr = str(emails[0].get("address") or "")
+        rows.append({"id": item.get("id"), "displayName": item.get("displayName"), "email": addr})
+    return {"ok": True, "provider": "microsoft-graph", "contacts": rows, "count": len(rows)}
+
+
+def drive_put(step: Dict[str, Any]) -> Dict[str, Any]:
+    token = graph_token()
+    if not token:
+        return _auth_denied("drive_put")
+    if not parse_confirm(step.get("confirm", False)):
+        return {"ok": False, "error": "drive_put requires confirm=true", "code": "CONFIRM_REQUIRED"}
+    path = str(step.get("path") or step.get("file") or "").strip()
+    dest = str(step.get("dest") or step.get("to") or Path(path).name if path else "").strip()
+    if not path or not dest:
+        return {"ok": False, "error": "drive_put requires path and dest", "code": "MISSING_PATH"}
+    ok, resolved, outside = _resolve_under_roots(path)
+    if not ok:
+        return {"ok": False, "error": resolved, "code": "BAD_PATH"}
+    if outside:
+        denied = _outside_denied("drive_put", resolved, True)
+        if denied:
+            return denied
+    target = Path(resolved)
+    if not target.is_file():
+        return {"ok": False, "error": f"file not found: {resolved}", "code": "NOT_FOUND"}
+    # Metadata-only PUT via JSON hook (tests); native upload would stream bytes.
+    payload = {"name": dest, "size": target.stat().st_size}
+    status, parsed, raw = _call(
+        "PUT",
+        f"{GRAPH_BASE}/me/drive/root:/{quote(dest.lstrip('/'))}:/content",
+        _headers(token),
+        payload,
+        timeout_of(step),
+    )
+    if status not in {200, 201}:
+        return error_from_http(status, parsed, raw, what="drive_put")
+    return {
+        "ok": True,
+        "provider": "microsoft-graph",
+        "id": parsed.get("id"),
+        "name": parsed.get("name") or dest,
+        "path": resolved,
+    }
+
+
+def mail_reply(step: Dict[str, Any]) -> Dict[str, Any]:
+    token = graph_token()
+    if not token:
+        return _auth_denied("mail_reply")
+    if not parse_confirm(step.get("confirm", False)):
+        return {"ok": False, "error": "mail_reply requires confirm=true", "code": "CONFIRM_REQUIRED"}
+    mid = str(step.get("id") or step.get("message_id") or step.get("message") or "").strip()
+    body = str(step.get("body") or step.get("text") or step.get("comment") or "")
+    if not mid:
+        return {"ok": False, "error": "mail_reply requires id", "code": "MISSING_ID"}
+    status, parsed, raw = _call(
+        "POST",
+        f"{GRAPH_BASE}/me/messages/{quote(mid)}/reply",
+        _headers(token),
+        {"comment": body},
+        timeout_of(step),
+    )
+    if status not in {200, 201, 202}:
+        return error_from_http(status, parsed, raw, what="mail_reply")
+    return {"ok": True, "provider": "microsoft-graph", "id": mid}

@@ -24,7 +24,7 @@ You control a Windows PC via Exo Control.
 - confirm=true for destructive OS ops. Never kill anti-cheat.
 - Compact responses by default; do not dump raw HTML/trees unless verbose.
 - Web facts: search / search_web (PERPLEXITY_API_KEY). Page markdown: scrape (FIRECRAWL_API_KEY). Cloud browser: browser_use (BROWSER_USE_API_KEY). Page UI: browser_*.
-- Docs on disk: files_convert / files_find / xlsx / read_url / docling / rag. Memory: memory_add / memory_search. History: recall (Screenpipe). Graph: todo / onenote / teams / mail_send. git / gh_pr. Search: tavily / exa. SaaS: slack / notion / linear.
+- Docs on disk: files_convert / files_find / xlsx / read_url / docling / rag / zip / sqlite. Memory: memory_add / memory_search. History: recall (Screenpipe). Graph: todo / onenote / teams / mail_send / cal_add. git / gh_pr. Search: tavily / exa / ddg / wiki. SaaS: slack / notion / linear / jira.
 - Exo Control is Windows-only. ego lite has no Windows app.
 ```
 

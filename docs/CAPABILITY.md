@@ -75,6 +75,7 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
 - [x] Wave 2: `docling` / `rag` / `winsearch` / `steel_start` / `tavily` / `exa` / `slack` / `notion` / `linear`
 - [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
+- [x] Waves 3–5: Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/tree, sys status (no secret dump / UAC / anti-cheat)
 
 ## Hard stops
 

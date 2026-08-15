@@ -1409,6 +1409,55 @@ class ExoExecEngine:
                     url=step.get("url") or step.get("href"),
                 )
             return {"ok": False, "error": "browser_tabs not available"}
+        if op == "browser_back":
+            return browser.back(step.get("space_id")) if hasattr(browser, "back") else {"ok": False, "error": "browser_back not available"}
+        if op == "browser_forward":
+            return browser.forward(step.get("space_id")) if hasattr(browser, "forward") else {"ok": False, "error": "browser_forward not available"}
+        if op == "browser_reload":
+            return browser.reload(step.get("space_id")) if hasattr(browser, "reload") else {"ok": False, "error": "browser_reload not available"}
+        if op == "browser_select":
+            sel = str(step.get("selector") or step.get("css") or "")
+            if not sel:
+                return {"ok": False, "error": "browser_select requires selector"}
+            return browser.select(sel, step.get("value") or step.get("option"), step.get("space_id"))
+        if op == "browser_upload":
+            sel = str(step.get("selector") or step.get("css") or "")
+            path = str(step.get("path") or step.get("file") or "")
+            if not sel or not path:
+                return {"ok": False, "error": "browser_upload requires selector and path"}
+            ok, resolved, outside = files_ops._resolve_under_roots(path)
+            if not ok:
+                return {"ok": False, "error": resolved}
+            denied = files_ops._outside_denied(
+                "browser_upload", resolved, parse_confirm(step.get("confirm", False)),
+            ) if outside else None
+            if denied:
+                return denied
+            return browser.upload(sel, resolved, step.get("space_id"))
+        if op == "browser_dialog":
+            return browser.page_dialog(
+                action=str(step.get("action") or "accept"),
+                text=step.get("text") or step.get("prompt"),
+                space_id=step.get("space_id"),
+            )
+        if op == "browser_storage":
+            return browser.storage(str(step.get("kind") or step.get("type") or "local"), step.get("space_id"))
+        if op == "browser_cookies":
+            include = parse_confirm(step.get("confirm", False)) or bool(step.get("include_values"))
+            if include and not parse_confirm(step.get("confirm", False)):
+                include = False
+            return browser.cookies(step.get("space_id"), include_values=include)
+        if op == "browser_console":
+            return browser.console_log(
+                step.get("space_id"),
+                int(step.get("max") or step.get("limit") or 40),
+            )
+        if op == "browser_viewport":
+            return browser.viewport(
+                width=step.get("width") or step.get("w"),
+                height=step.get("height") or step.get("h"),
+                space_id=step.get("space_id"),
+            )
 
         if op in {"screenshot", "shot"}:
             # path => write file; otherwise return compact base64 JPEG via engine helper
