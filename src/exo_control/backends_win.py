@@ -48,22 +48,40 @@ class PywinautoBackend(ActionBackend):
         if not self._ready:
             return DeliveryResult(False, "pywinauto", "not available")
         try:
+            clicks = int(kwargs.get("clicks") or 1)
+            btn = (button or "left").lower()
+            use_invoke = btn in {"left", "l"} and clicks <= 1
             if pid is not None and element_index is not None:
                 el = self._find_element(pid, element_index, window_id)
                 if el is None:
                     return DeliveryResult(False, "pywinauto", "element not found")
-                for method in ("invoke", "click", "click_input"):
-                    fn = getattr(el, method, None)
-                    if callable(fn):
-                        try:
-                            fn()
-                            return DeliveryResult(
-                                True, "pywinauto",
-                                f"clicked element_index={element_index} via {method}",
-                                element_index=element_index,
-                            )
-                        except Exception:
-                            continue
+                if not use_invoke:
+                    try:
+                        r = el.rectangle()
+                        cx = (int(r.left) + int(r.right)) // 2
+                        cy = (int(r.top) + int(r.bottom)) // 2
+                        from pywinauto import mouse
+                        mouse.click(button=btn if btn != "l" else "left", coords=(cx, cy), click_count=max(1, clicks))
+                        return DeliveryResult(
+                            True, "pywinauto",
+                            f"{btn} x{clicks} element_index={element_index}",
+                            element_index=element_index,
+                        )
+                    except Exception:
+                        pass
+                if use_invoke:
+                    for method in ("invoke", "click", "click_input"):
+                        fn = getattr(el, method, None)
+                        if callable(fn):
+                            try:
+                                fn()
+                                return DeliveryResult(
+                                    True, "pywinauto",
+                                    f"clicked element_index={element_index} via {method}",
+                                    element_index=element_index,
+                                )
+                            except Exception:
+                                continue
                 return DeliveryResult(False, "pywinauto", "element methods failed")
             if x is not None and y is not None:
                 from pywinauto import mouse

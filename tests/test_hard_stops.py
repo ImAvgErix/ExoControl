@@ -20,6 +20,9 @@ def lease_home(tmp_path, monkeypatch):
     monkeypatch.setenv("AETHER_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("AETHER_FILE_ROOTS", str(tmp_path / "workspace"))
     (tmp_path / "workspace").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("EXO_DISABLE_ELEVATE", "1")
+    monkeypatch.delenv("EXO_TRUST", raising=False)
+    monkeypatch.delenv("EXO_FULL_TRUST", raising=False)
     yield tmp_path
 
 

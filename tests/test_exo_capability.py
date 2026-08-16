@@ -176,7 +176,7 @@ def test_registry_gates(lease_home, monkeypatch):
         confirm=True,
     )
     assert hklm["ok"] is False
-    assert "HKLM" in hklm["error"]
+    assert "denied" in hklm["error"].lower()
 
     eng = AetherExecEngine(controller=EyesStub())
     out = eng.execute(

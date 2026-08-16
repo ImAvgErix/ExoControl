@@ -233,10 +233,26 @@ class SmartController:
 
     def glance(self, force_ocr: bool = False) -> Dict[str, Any]:
         """Compact what a person would notice after moving the mouse or keys."""
-        raw = self.eyes_read(force_ocr=force_ocr)
+        raw = {}
+        try:
+            raw = self.eyes_read(force_ocr=force_ocr)
+        except Exception:
+            raw = {}
         if not isinstance(raw, dict) or not raw.get("ok"):
-            err = raw.get("error") if isinstance(raw, dict) else "no eyes"
-            return {"ok": False, "error": err}
+            try:
+                ui = self.read_ui()
+                labels = list((ui.get("labels") or [])[:12])
+                return {
+                    "ok": True,
+                    "title": ui.get("title") or "",
+                    "changed": None,
+                    "labels": labels,
+                    "pid": ui.get("pid") or self._focus_pid,
+                    "via": "a11y",
+                }
+            except Exception:
+                err = raw.get("error") if isinstance(raw, dict) else "no eyes"
+                return {"ok": False, "error": err}
         labels: List[str] = []
         for item in raw.get("a11y") or []:
             if isinstance(item, dict) and item.get("name"):
@@ -258,6 +274,64 @@ class SmartController:
             "labels": labels,
             "pid": raw.get("pid"),
         }
+
+    def hands_glance(self, claimed: Optional[str] = None) -> Dict[str, Any]:
+        """Cheap post-hand glance: title + whether claimed label/hit still matches. No JPEG."""
+        try:
+            ui = self.read_ui()
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        if not isinstance(ui, dict):
+            return {"ok": False, "error": "read_ui failed"}
+        title = str(ui.get("title") or "")
+        labels = [str(x) for x in (ui.get("labels") or []) if x][:12]
+        match = None
+        needle = (claimed or "").strip()
+        if needle:
+            match = self._claimed_still_visible(needle, title, labels, ui)
+        out: Dict[str, Any] = {"ok": True, "title": title, "match": match, "label": claimed}
+        if labels:
+            out["labels"] = labels[:8]
+        return out
+
+    @staticmethod
+    def _claimed_still_visible(
+        claimed: str,
+        title: str,
+        labels: List[str],
+        ui: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        needle = claimed.lower().strip()
+        if not needle:
+            return False
+        if needle in title.lower():
+            return True
+        for lab in labels:
+            low = str(lab).lower()
+            if needle in low or (low and low in needle):
+                return True
+        if isinstance(ui, dict):
+            for val in ui.get("values") or []:
+                if needle in str(val).lower():
+                    return True
+            for el in ui.get("elements") or []:
+                if not isinstance(el, dict):
+                    continue
+                name = str(el.get("name") or el.get("label") or "").lower()
+                if needle in name or (name and name in needle):
+                    return True
+        try:
+            from . import session as exo_session
+            for hit in exo_session.get_hits() or []:
+                if not isinstance(hit, dict):
+                    continue
+                hl = str(hit.get("label") or "").lower()
+                href = str(hit.get("ref") or "").lower()
+                if needle == href or needle in hl or (hl and hl in needle):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def read_ui(self, pid: Optional[int] = None, force: bool = False,
                 interactive_only: bool = False, max_elements: int = 120) -> Dict[str, Any]:
@@ -468,9 +542,15 @@ class SmartController:
         y: Any = None,
         w: Any = None,
         h: Any = None,
+        width: Any = None,
+        height: Any = None,
         snap: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Move / resize / snap via SetWindowPos. Linux callers get WINDOWS_ONLY."""
+        if width is not None and w is None:
+            w = width
+        if height is not None and h is None:
+            h = height
         handle = self._hwnd_for_window_op(hwnd)
         if handle is None:
             return {"ok": False, "error": "no focused window"}
@@ -530,6 +610,16 @@ class SmartController:
             "snap": edge or None,
             "window": self.window_state(handle),
         }
+    def window_resize(
+        self,
+        hwnd: Optional[int] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return self.window_move(hwnd=hwnd, w=width, h=height)
+
+    def window_snap(self, hwnd: Optional[int] = None, side: str = "left") -> Dict[str, Any]:
+        return self.window_move(hwnd=hwnd, snap=str(side or "left"))
 
     def _window_alive(self, hwnd: Optional[int]) -> bool:
         if hwnd is None:
@@ -708,10 +798,14 @@ class SmartController:
     # ── Eyes ────────────────────────────────────────────────────────
 
     def observe(self, use_cache: bool = False, **kwargs) -> Dict[str, Any]:
+        kwargs = dict(kwargs)
         mon = kwargs.get("monitor")
         if mon is None and self._focus_monitor is not None:
-            kwargs = dict(kwargs)
             kwargs["monitor"] = int(self._focus_monitor)
+        if kwargs.get("region") is None:
+            rect = self._resolve_focus_rect()
+            if rect:
+                kwargs["region"] = rect
         out = (self.perception.observe_cached(**kwargs) if use_cache
                else self.perception.observe(**kwargs))
         # PerceptionEngine reports a11y as unwired; it is wired here via UIA.
@@ -787,6 +881,13 @@ class SmartController:
                 self._focus_window_id = window_id
         raised = False
         if window_id is not None:
+            try:
+                st = self.window_state(int(window_id))
+                r = st.get("rect") if isinstance(st, dict) else None
+                if isinstance(r, (list, tuple)) and len(r) == 4:
+                    self._focus_rect = tuple(int(x) for x in r)
+            except Exception:
+                pass
             raised = self._raise_hwnd(int(window_id))
         # A stale tree from before the raise would describe the old window.
         self._uia().invalidate(pid, window_id)
@@ -955,32 +1056,39 @@ class SmartController:
 
     # ── Delivery ────────────────────────────────────────────────────
 
-    def _invoke_live(self, live, button: str = "left") -> DeliveryResult:
+    def _invoke_live(self, live, button: str = "left", clicks: int = 1) -> DeliveryResult:
         if live is None:
             return DeliveryResult(False, self.backend.name, "no live element")
-        for method in ("invoke", "toggle", "select", "click", "click_input"):
-            fn = getattr(live, method, None)
-            if not callable(fn):
-                continue
-            try:
-                fn()
-                return DeliveryResult(True, self.backend.name, f"live:{method}")
-            except Exception:
-                continue
-        # coord fallback from rectangle
+        btn = (button or "left").lower()
+        use_invoke = btn in {"left", "l"} and int(clicks or 1) <= 1
+        if use_invoke:
+            for method in ("invoke", "toggle", "select", "click", "click_input"):
+                fn = getattr(live, method, None)
+                if not callable(fn):
+                    continue
+                try:
+                    fn()
+                    return DeliveryResult(True, self.backend.name, f"live:{method}")
+                except Exception:
+                    continue
+        # coord fallback from rectangle (right / double / invoke miss)
         try:
             r = live.rectangle()
             cx, cy = (int(r.left) + int(r.right)) // 2, (int(r.top) + int(r.bottom)) // 2
-            return self.backend.click(x=cx, y=cy, button=button)
+            return self.backend.click(x=cx, y=cy, button=button, clicks=clicks)
         except Exception as e:
             return DeliveryResult(False, self.backend.name, str(e))
 
     def _deliver_click(self, target: Optional[Target] = None, x: Optional[int] = None,
-                       y: Optional[int] = None, button: str = "left") -> DeliveryResult:
+                       y: Optional[int] = None, button: str = "left",
+                       clicks: int = 1) -> DeliveryResult:
+        btn = (button or "left").lower()
+        nclicks = max(1, min(3, int(clicks or 1)))
+        use_invoke = btn in {"left", "l"} and nclicks <= 1
         if target and target.is_a11y:
             meta = target.meta or {}
             cached = meta.get("cached")
-            if cached is not None and button == "left":
+            if cached is not None and use_invoke:
                 # Invoke straight through the UIA pattern — no wrapper build,
                 # no cursor movement, works on a background window.
                 try:
@@ -997,17 +1105,18 @@ class SmartController:
                 except Exception:
                     live = None
             if live is not None and (target.element_index is None or target.element_index < 0):
-                res = self._invoke_live(live, button=button)
+                res = self._invoke_live(live, button=button, clicks=nclicks)
                 if res.ok:
                     return res
             if target.element_index is not None and target.element_index >= 0 and hasattr(self.backend, "click"):
                 res = self.backend.click(pid=target.pid, window_id=target.window_id,
-                                         element_index=target.element_index, button=button)
+                                         element_index=target.element_index, button=button,
+                                         clicks=nclicks)
                 if res.ok:
                     return res
                 # Retry via stashed live wrapper
                 if live is not None:
-                    res = self._invoke_live(live, button=button)
+                    res = self._invoke_live(live, button=button, clicks=nclicks)
                     if res.ok:
                         return res
         cx, cy = x, y
@@ -1027,14 +1136,17 @@ class SmartController:
         except Exception:
             pass
         res = self.backend.click(
-            x=int(cx), y=int(cy), button=button,
+            x=int(cx), y=int(cy), button=button, clicks=nclicks,
             pid=getattr(target, "pid", None) if target else self._focus_pid,
             window_id=getattr(target, "window_id", None) if target else self._focus_window_id,
         )
         if res.ok:
             return res
         if self.backend.name != "local":
-            return self.local_fallback.click(x=int(cx), y=int(cy), button=button)
+            try:
+                return self.local_fallback.click(x=int(cx), y=int(cy), button=button, clicks=nclicks)
+            except TypeError:
+                return self.local_fallback.click(x=int(cx), y=int(cy), button=button)
         return res
 
     def _deliver_type(self, text: str, clear: bool = False, target: Optional[Target] = None) -> DeliveryResult:
@@ -1067,7 +1179,11 @@ class SmartController:
                     element_index: Optional[int] = None,
                     pid: Optional[int] = None,
                     window_id: Optional[int] = None,
-                    label: Optional[str] = None) -> ActionOutcome:
+                    label: Optional[str] = None,
+                    clicks: int = 1,
+                    bbox: Optional[List[int]] = None,
+                    source: Optional[str] = None,
+                    kind: Optional[str] = None) -> ActionOutcome:
         t0 = time.time()
         if not getattr(self, "_safety_prechecked", False):
             ok_s, why = self.safety.check("click", text=query or "", confirm=False)
@@ -1075,12 +1191,35 @@ class SmartController:
                 return ActionOutcome(False, False, why, elapsed=0.0, backend=self.backend_name)
         self._metrics["clicks"] += 1
 
-        # Fast path: a11y/memory first — skip desktop OCR/diff (was ~6–9s per click).
+        # Fast path: session hits, then a11y/memory — skip desktop OCR/diff.
         targets: List[Target] = []
         pre: Dict[str, Any] = {}
         pre_id = None
+        # Session fused hits (ref/label/kind) before UIA before coords.
+        src = str(source or "").lower()
+        if bbox and len(bbox) == 4 and src in {"opencv", "ocr", "fused", "uia", "session-hit"}:
+            try:
+                box = [int(v) for v in bbox]
+                t = Target(
+                    kind=str(kind or src or "element"),
+                    label=str(label or query or kind or src),
+                    bbox=box,
+                    confidence=0.86 if src == "fused" else 0.82,
+                    source=src or "fused",
+                    pid=int(pid) if pid is not None else self._focus_pid,
+                    window_id=int(window_id) if window_id is not None else self._focus_window_id,
+                    element_index=int(element_index) if element_index is not None and src in {"uia", ""} else None,
+                    meta={"role": kind or src, "via": "session-hit"},
+                )
+                if t.center:
+                    t.x, t.y = t.center
+                targets = [t]
+            except Exception:
+                pass
+        if not targets:
+            targets = self._match_session_hits(query=query, label=label, kind=kind)
         # Stable script ref → element_index (same exec batch as prior read/observe).
-        if element_index is not None:
+        if element_index is not None and not targets:
             use_pid = int(pid) if pid is not None else self._focus_pid
             use_hwnd = int(window_id) if window_id is not None else self._focus_window_id
             if use_pid is None:
@@ -1113,8 +1252,20 @@ class SmartController:
                 pre = self.observe(modes=["ocr", "vision", "diff"], include_image=False, use_cache=True)
                 pre_id = pre.get("obs_id")
                 targets = self.find_targets(query, obs=pre, allow_ocr=True)
-        if x is not None and y is not None:
-            targets.append(Target(kind="coords", label=f"({x},{y})", x=x, y=y, confidence=0.55, source="coords"))
+        last_resort_coords = False
+        if x is not None and y is not None and not targets:
+            if query:
+                return ActionOutcome(
+                    False, False,
+                    f"No targets for {query!r}; guessed ({int(x)},{int(y)}) rejected",
+                    elapsed=time.time()-t0, backend=self.backend_name,
+                )
+            last_resort_coords = True
+            targets.append(Target(
+                kind="coords", label=f"({int(x)},{int(y)})",
+                x=int(x), y=int(y), confidence=0.55, source="coords",
+                meta={"last_resort": True},
+            ))
         if not targets:
             if query:
                 self.memory.record_failure(
@@ -1136,7 +1287,7 @@ class SmartController:
             if target.source == "memory":
                 used_memory = True
             pre_hash = self.ui_hash() if (require_change and target.is_a11y) else ""
-            delivery = self._deliver_click(target=target, button=button)
+            delivery = self._deliver_click(target=target, button=button, clicks=clicks)
             # a11y invoke is authoritative — skip expensive verify unless required.
             if delivery.ok and target.is_a11y and not require_change:
                 if query:
@@ -1189,7 +1340,19 @@ class SmartController:
             post = self.observe(modes=["diff"], include_image=False, use_cache=False)
             post_id = post.get("obs_id")
             changed = self._verify_change(pre, post) if (self.verify and pre) else True
+            if last_resort_coords and target.source == "coords" and (not pre or not changed):
+                last_msg = (
+                    f"coord last-resort at ({target.x},{target.y}) unverified "
+                    f"(conf={target.confidence:.2f}); not claiming hit"
+                )
+                continue
             if delivery.ok and (not self.verify or changed or not require_change):
+                if last_resort_coords and target.source == "coords" and not changed:
+                    last_msg = (
+                        f"coord last-resort at ({target.x},{target.y}) unverified "
+                        f"(conf={target.confidence:.2f}); not claiming hit"
+                    )
+                    continue
                 if query:
                     if not isinstance(target.meta, dict):
                         target.meta = {}
@@ -1611,6 +1774,7 @@ class SmartController:
                     out = self.smart_click(
                         query=act.get("query"), x=act.get("x"), y=act.get("y"),
                         button=act.get("button", "left"),
+                        clicks=int(act.get("clicks") or 1),
                         require_change=act.get("require_change", False),
                     )
                 elif op == "type":
@@ -2009,6 +2173,12 @@ class SmartController:
             fr = self.focus_window(wpid, wid)
             raised = bool(fr.get("raised"))
         self._focus_monitor = mon_id
+        rect = match.get("rect")
+        if isinstance(rect, (list, tuple)) and len(rect) == 4:
+            try:
+                self._focus_rect = tuple(int(x) for x in rect)
+            except Exception:
+                pass
         if self.macros.is_recording():
             self.macros.add("focus", title=title, pid=wpid, window_id=wid, monitor=mon_id)
         out = {
@@ -2107,17 +2277,165 @@ class SmartController:
                 return ActionOutcome(True, True, "Screen changed", elapsed=time.time() - t0, backend=self.backend_name)
         return ActionOutcome(False, False, "No change detected", elapsed=time.time() - t0, backend=self.backend_name)
 
+    def _window_capture_region(self) -> Optional[Tuple[int, int, int, int]]:
+        """Focused window rect in screen coords, or None (never the whole 4K desktop)."""
+        rect = self._focus_rect
+        try:
+            st = self.window_state(self._focus_window_id)
+            if isinstance(st, dict) and st.get("rect"):
+                rect = st.get("rect")
+        except Exception:
+            pass
+        if not rect or len(rect) != 4:
+            return None
+        try:
+            x1, y1, x2, y2 = (int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3]))
+        except (TypeError, ValueError):
+            return None
+        if x2 - x1 < 20 or y2 - y1 < 20:
+            return None
+        return (x1, y1, x2, y2)
+
+    def _resolve_focus_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        """Focused window rect in screen coords, or None."""
+        rect = self._focus_rect
+        try:
+            st = self.window_state(self._focus_window_id)
+            raw = st.get("rect") if isinstance(st, dict) else None
+            if isinstance(raw, (list, tuple)) and len(raw) == 4:
+                rect = tuple(int(x) for x in raw)
+                self._focus_rect = rect
+        except Exception:
+            pass
+        if not rect or len(rect) != 4:
+            return None
+        try:
+            x1, y1, x2, y2 = (int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3]))
+        except Exception:
+            return None
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            return None
+        return (x1, y1, x2, y2)
+
+    @staticmethod
+    def _offset_bbox(bbox: Any, origin: Optional[Tuple[int, int, int, int]]) -> Any:
+        if not origin or not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            return bbox
+        try:
+            ox, oy = int(origin[0]), int(origin[1])
+            return [int(bbox[0]) + ox, int(bbox[1]) + oy, int(bbox[2]) + ox, int(bbox[3]) + oy]
+        except Exception:
+            return bbox
+
+    def _fuse_window_eyes(
+        self,
+        include_ocr: bool,
+        max_ocr: int,
+        max_elements: int,
+        monitor: Optional[int],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool, Optional[Tuple[int, int, int, int]]]:
+        """OpenCV + optional OCR bound to the focused window rect (not full desktop)."""
+        ocr: List[Dict[str, Any]] = []
+        els: List[Dict[str, Any]] = []
+        ocr_available = False
+        try:
+            ocr_available = bool(self.perception.ocr_available())
+        except Exception:
+            ocr_available = False
+        region = self._resolve_focus_rect()
+        mon = int(monitor) if monitor is not None else (self._focus_monitor or 1)
+        img = None
+        try:
+            img = self.perception.capture(monitor=mon, region=region)
+        except Exception:
+            img = None
+        if include_ocr and ocr_available and img is not None:
+            try:
+                ocr = list(self.perception._run_ocr(img) or [])
+            except Exception:
+                ocr = []
+        if img is not None:
+            try:
+                from .grounding import LocalGrounder
+                grounded = LocalGrounder(max_elements=max_elements).ground(
+                    img, ocr_items=ocr if include_ocr else [],
+                )
+                for e in grounded:
+                    item = e.as_dict() if hasattr(e, "as_dict") else dict(e)
+                    item["bbox"] = self._offset_bbox(item.get("bbox"), region)
+                    els.append(item)
+            except Exception:
+                els = []
+        if region:
+            ocr = [
+                {**item, "bbox": self._offset_bbox(item.get("bbox"), region)}
+                if isinstance(item, dict) else item
+                for item in ocr
+            ]
+        return ocr[:max_ocr], els[:max_elements], ocr_available, region
+
+    def _match_session_hits(
+        self,
+        query: Optional[str] = None,
+        label: Optional[str] = None,
+        kind: Optional[str] = None,
+        ref: Optional[str] = None,
+    ) -> List["Target"]:
+        try:
+            from . import session as exo_session
+            hits = exo_session.get_hits()
+        except Exception:
+            return []
+        needle = (query or label or "").strip()
+        kind_l = (kind or "").strip().lower()
+        ref_key = str(ref).strip() if ref is not None else ""
+        out: List[Target] = []
+        for h in hits:
+            if not isinstance(h, dict) or not h.get("visible", True):
+                continue
+            href = str(h.get("ref") or "")
+            if ref_key:
+                if href != ref_key and not (ref_key.isdigit() and href == f"e{ref_key}"):
+                    continue
+            else:
+                if kind_l and str(h.get("kind") or "").lower() != kind_l:
+                    continue
+                hl = str(h.get("label") or "")
+                if needle:
+                    if _score_match(needle, hl, base=0.7) < 0.3:
+                        continue
+                elif not kind_l:
+                    continue
+            bbox = h.get("bbox") if isinstance(h.get("bbox"), list) else None
+            t = Target(
+                kind=str(h.get("kind") or "hit"),
+                label=str(h.get("label") or needle or href or "hit"),
+                bbox=bbox,
+                confidence=0.9,
+                source="session-hit",
+                pid=h.get("pid") or self._focus_pid,
+                window_id=h.get("window_id") or self._focus_window_id,
+                element_index=h.get("element_index"),
+                meta={"via": "session-hit", "ref": h.get("ref"), "role": h.get("kind")},
+            )
+            if t.center:
+                t.x, t.y = t.center
+            out.append(t)
+        return out
+
     def compact_observe(
         self,
-        include_ocr: bool = False,
+        include_ocr: bool = True,
         max_ocr: int = 40,
         max_elements: int = 30,
         monitor: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Token-efficient observation for LLM agents (a11y-first, optional OCR).
+        """Token-efficient observation (fused eyes: a11y + OpenCV + OCR).
 
-        When ``monitor`` is set, OCR/vision bind to that display. If a window is
-        focused and does not live on that monitor, fail closed.
+        Default ``include_ocr`` is True. OpenCV grounding always runs. If OCR
+        is missing, the payload still has OpenCV boxes + a11y and
+        ``ocr_available`` is false. OCR/grounding bind to the focused window
+        rect, not the full desktop.
         """
         from .monitors import get_monitor, monitor_bind_error, rect_on_monitor
 
@@ -2127,17 +2445,9 @@ class SmartController:
         if mon_id is not None and mon_info is None:
             return monitor_bind_error(mon_id, "unknown monitor id")
 
-        # Only fail-closed on explicit agent focus — read_ui may adopt the
-        # foreground HWND and must not poison monitor-bound OCR.
         explicit_focus = self._focus_pid is not None or self._focus_window_id is not None
         if mon_info is not None and explicit_focus:
-            rect = self._focus_rect
-            try:
-                st = self.window_state(self._focus_window_id)
-                if isinstance(st, dict) and st.get("rect"):
-                    rect = st.get("rect")
-            except Exception:
-                pass
+            rect = self._resolve_focus_rect()
             if rect and not rect_on_monitor(rect, mon_info):
                 return monitor_bind_error(
                     int(mon_id),
@@ -2146,22 +2456,12 @@ class SmartController:
 
         ui = self.read_ui()
 
-        ocr: List[Dict[str, Any]] = []
-        els: List[Dict[str, Any]] = []
-        if include_ocr:
-            # Prefer realtime buffer if running; else one cheap OCR pass
-            eyes = self._get_eyes()
-            if eyes._running and mon_id is None:
-                frame = eyes.read_now(force_ocr=False)
-                ocr = frame.get("labels") or []
-            else:
-                obs_kw: Dict[str, Any] = {"modes": ["ocr"], "include_image": False, "use_cache": True}
-                if mon_id is not None:
-                    obs_kw["monitor"] = int(mon_id)
-                    obs_kw["use_cache"] = False
-                obs = self.observe(**obs_kw)
-                ocr = (obs.get("vision") or {}).get("ocr") or []
-                els = (obs.get("vision") or {}).get("elements") or []
+        ocr, els, ocr_available, region = self._fuse_window_eyes(
+            include_ocr=include_ocr,
+            max_ocr=max_ocr,
+            max_elements=max_elements,
+            monitor=mon_id,
+        )
         a11y_els = ui.get("elements") or []
         a11y_compact = []
         for e in a11y_els[:max_elements]:
@@ -2174,6 +2474,47 @@ class SmartController:
             if e.get("value"):
                 item["value"] = e.get("value")
             a11y_compact.append(item)
+        hits: List[Dict[str, Any]] = []
+        for e in a11y_compact:
+            hits.append({
+                "label": e.get("label"),
+                "kind": e.get("role") or "a11y",
+                "bbox": e.get("bbox"),
+                "source": "uia",
+                "visible": True,
+                "element_index": e.get("element_index"),
+            })
+        for e in els:
+            hits.append({
+                "label": e.get("label"),
+                "kind": e.get("kind"),
+                "bbox": e.get("bbox"),
+                "source": e.get("source") or "opencv",
+                "visible": True,
+            })
+        for i in ocr:
+            hits.append({
+                "label": i.get("text"),
+                "kind": "text",
+                "bbox": i.get("bbox"),
+                "source": "ocr",
+                "visible": True,
+            })
+        from .compact import MAX_COMPACT_REFS
+        hits = hits[:MAX_COMPACT_REFS]
+        for i, h in enumerate(hits):
+            h["ref"] = h.get("ref") or f"e{i}"
+            h["role"] = h.get("role") or h.get("kind")
+        try:
+            from . import session as exo_session
+            exo_session.replace_hits(hits)
+        except Exception:
+            pass
+        ocr_backend = "unavailable"
+        try:
+            ocr_backend = self.perception.ocr_status()
+        except Exception:
+            pass
         out: Dict[str, Any] = {
             "ok": True,
             "backend": self.backend_name,
@@ -2192,12 +2533,24 @@ class SmartController:
                  "bbox": e.get("bbox"), "source": e.get("source")}
                 for e in els[:max_elements]
             ],
+            "hits": hits, "hit_count": len(hits), "ocr_backend": ocr_backend,
             "ocr_count": len(ocr),
             "element_count": len(els),
             "a11y_count": len(a11y_els),
+            "ocr_available": bool(ocr_available) if include_ocr else False,
             "elapsed": round(time.time() - t0, 3),
             "cached_tree": True,
         }
+        if include_ocr and not ocr_available:
+            out["ocr_note"] = "ocr unavailable"
+            out["ocr"] = "unavailable"
+        if region:
+            out["bound"] = "window"
+            out["region"] = list(region)
+        elif mon_id is not None:
+            out["bound"] = "monitor"
+        else:
+            out["bound"] = "desktop"
         if mon_id is not None:
             out["monitor"] = int(mon_id)
             out["monitor_info"] = mon_info

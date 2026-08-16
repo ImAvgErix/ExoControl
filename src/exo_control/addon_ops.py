@@ -278,6 +278,12 @@ def dispatch(op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def capabilities() -> Dict[str, Any]:
+    ocr_win_ok = False
+    try:
+        from exo_control.win_native import ocr_win_available
+        ocr_win_ok = bool(ocr_win_available())
+    except Exception:
+        ocr_win_ok = False
     return {
         "firecrawl": True,
         "firecrawl_configured": firecrawl_ops.configured(),
@@ -306,12 +312,13 @@ def capabilities() -> Dict[str, Any]:
         "winget": True,
         "recycle": True,
         "eventlog": True,
-        "ocr_win": True,
-        "stt": True,
+        "ocr_win": ocr_win_ok,
+        "stt": False,
         "tts": True,
         "docling": True,
         "rag": True,
         "winsearch": True,
+        "winsearch_is_walk": True,
         "steel": True,
         "steel_configured": steel_ops.configured(),
         "tavily": True,
@@ -361,7 +368,7 @@ def readiness() -> Dict[str, Any]:
     import sys
 
     from exo_control import search_ops
-    from exo_control.win_native import WINDOWS_NATIVE_OPS
+    from exo_control.win_native import WINDOWS_NATIVE_OPS, ocr_win_available
 
     ready = [
         "help", "observe", "whoami", "hash", "disk", "git", "rag",
@@ -371,6 +378,14 @@ def readiness() -> Dict[str, Any]:
     ]
     windows_native = list(WINDOWS_NATIVE_OPS)
     on_windows = sys.platform == "win32"
+    stub = ["stt"]
+    try:
+        winocr = bool(ocr_win_available())
+    except Exception:
+        winocr = False
+    if not winocr:
+        windows_native = [name for name in windows_native if name != "ocr_win"]
+        stub.append("ocr_win")
     return {
         "ok": True,
         "honest": True,
@@ -386,5 +401,5 @@ def readiness() -> Dict[str, Any]:
             "firecrawl": {"ok": firecrawl_ops.configured(), "env": "FIRECRAWL_API_KEY"},
             "graph": {"ok": graph_ops.configured(), "env": "MICROSOFT_GRAPH_TOKEN"},
         },
-        "stub": ["stt", "ocr_win"],
+        "stub": stub,
     }

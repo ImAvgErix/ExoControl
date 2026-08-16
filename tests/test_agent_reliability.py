@@ -50,7 +50,7 @@ class StubCtrl(SmartController):
         }
 
     def smart_click(self, query=None, x=None, y=None, button="left", require_change=False,
-                    element_index=None, pid=None, window_id=None, label=None):
+                    element_index=None, pid=None, window_id=None, label=None, clicks=1):
         self._clicks.append(
             {"query": query, "element_index": element_index, "pid": pid, "label": label}
         )

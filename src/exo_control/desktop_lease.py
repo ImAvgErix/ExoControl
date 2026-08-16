@@ -121,8 +121,10 @@ def _active(lease: Optional[Dict[str, Any]], now: Optional[float] = None) -> boo
 
 
 def _conflict(lease: Dict[str, Any]) -> Dict[str, Any]:
+    holder = lease.get("agent_id") or "unknown"
     return {
         "ok": False,
+        "error": f"desktop lease held by {holder}",
         "holder": lease.get("agent_id"),
         "task": lease.get("task"),
         "expires_at": _iso(float(lease.get("expires_at") or 0)),
@@ -248,7 +250,10 @@ def force_release(token: Optional[str] = None, agent_id: Optional[str] = None) -
                 "error": "force_release requires token, holder agent_id, expired lease, or EXO_ALLOW_FORCE_RELEASE=1",
                 "forced": True,
             }
-            out.update(_conflict(lease))
+            extra = _conflict(lease)
+            extra.pop("error", None)
+            extra.pop("ok", None)
+            out.update(extra)
             # Never leak the token from a failed force.
             out.pop("token", None)
             return out

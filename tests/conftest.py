@@ -9,3 +9,8 @@ def pytest_configure():
         os.environ.setdefault("EXO_LIVE_EYES", "1")
     else:
         os.environ.setdefault("EXO_LIVE_EYES", "0")
+        # Isolated unit tests must not inherit operator Full-Trust / kill env.
+        os.environ["EXO_TRUST"] = "default"
+        os.environ.pop("EXO_FULL_TRUST", None)
+        os.environ.pop("AETHER_FULL_TRUST", None)
+        os.environ.pop("EXO_KILL_SWITCH", None)

@@ -1,6 +1,6 @@
 [project]
 name = "exo-control"
-version = "2.2.0"
+version = "2.5.0"
 description = "Exo Control — realtime PC eyes and hands for any AI agent (MCP + CLI + Python). Compact. Leased. Honest."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,12 +32,19 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.40.0"]
+web = ["playwright>=1.40.0", "browser-use>=0.1.0"]
 ocr = ["pytesseract", "easyocr"]
+ocr-win = [
+    "winrt-runtime>=2.3.0; platform_system=='Windows'",
+    "winrt-Windows.Media.Ocr>=2.3.0; platform_system=='Windows'",
+    "winrt-Windows.Graphics.Imaging>=2.3.0; platform_system=='Windows'",
+    "winrt-Windows.Storage>=2.3.0; platform_system=='Windows'",
+]
 docs = ["markitdown"]
 agent = ["openai"]
 legacy-input = ["pyautogui>=0.9.54"]
 dev = ["pytest>=7.0", "build", "twine"]
-full = ["playwright>=1.40.0", "pytesseract", "easyocr", "pyautogui>=0.9.54", "markitdown"]
+full = ["playwright>=1.40.0", "pytesseract", "easyocr", "pyautogui>=0.9.54", "markitdown", "browser-use>=0.1.0"]
 
 [build-system]
 requires = ["setuptools>=61"]

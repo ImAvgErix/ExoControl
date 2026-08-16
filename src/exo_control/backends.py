@@ -79,7 +79,8 @@ class LocalBackend(ActionBackend):
 
     def click(self, x: Optional[int] = None, y: Optional[int] = None,
               button: str = "left", **kwargs) -> DeliveryResult:
-        ok, msg = self._unpack(self.engine.click(x=x, y=y, button=button))
+        clicks = int(kwargs.get("clicks") or 1)
+        ok, msg = self._unpack(self.engine.click(x=x, y=y, button=button, clicks=clicks))
         return DeliveryResult(ok, "local", msg)
 
     def type_text(self, text: str, **kwargs) -> DeliveryResult:

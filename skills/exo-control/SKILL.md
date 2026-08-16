@@ -14,7 +14,8 @@ Hardened PC control plane. Not tied to Cursor, Grok, Claude, or Codex — those 
 3. **Python**: `from exo_control import ExoExecEngine`
 
 Server: `python -m exo_control.slim_mcp_server`  
-Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"` (or `pip install -e .`).  
+Install: `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.4.0"` (or `pip install -e .`).  
+Optional: `pip install "exo-control[browser]"` (CDP) or `"exo-control[web]"` (Browser Use).  
 Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`. `PERPLEXITY_API_KEY` unlocks `search`. `BROWSER_USE_API_KEY` unlocks `browser_use`. `FIRECRAWL_API_KEY` unlocks `scrape`. Local `files_convert` / `files_find` / `memory_*` work without cloud keys.
 
 ## Rules
@@ -22,9 +23,11 @@ Env: `EXO_PREFER_CUA=0`. State under `~/.exo/`. `PERPLEXITY_API_KEY` unlocks `se
 1. Script-first — one batched exec, not click spam.
 2. `lease_acquire` before hands; `lease_release` after.
 3. Structure first (observe/read/verify); screenshot only on miss or explicit ask.
-4. `{"op":"help"}` or `exo_help` if unsure of ops.
-5. `confirm=true` for destructive OS ops; never kill anti-cheat.
-6. Multi-monitor: pass `monitor` on focus/observe/shot; wrong display fails closed.
+4. Prefer `web_task` for multi-step web jobs (structure mode). Screenshots only on miss.
+5. `{"op":"help"}` or `exo_help` if unsure of ops. `find` for a control by name. `pc` for volume/power/idle/wifi.
+6. `confirm=true` for destructive OS ops unless Full-Trust is on. Full-Trust is owner mode (broker auto-elevates). Kill file `~/.exo/KILL` still wins.
+7. Multi-monitor: pass `monitor` on focus/observe/shot; wrong display fails closed.
+8. Human kill-switch is `~/.exo/KILL`. Do not try to disarm a kill file.
 
 ## Web search (not UI find)
 
@@ -83,7 +86,6 @@ Hosted web agent or a managed Chromium you drive with existing `browser_*` ops. 
 
 ## Docs in repo
 
-- `AGENTS.md` — drop into any agent context
 - `docs/HARNESS.md` — install for every host
 - `docs/CAPABILITY.md` — capability bar
 - `SECURITY.md` — hard stops

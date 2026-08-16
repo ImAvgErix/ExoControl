@@ -1,0 +1,10 @@
+﻿.tmp-grok-ui/
+.tmp-exo-*.jpg
+**/.vercel/
+**/node_modules/
+**/.venv/
+**/venv/
+**/__pycache__/
+**/.pytest_cache/
+**/*.egg-info/
+**/*.log

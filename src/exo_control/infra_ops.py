@@ -126,13 +126,16 @@ def kill_proc(
     Name-only path hard-denies protected anti-cheat substrings without requiring
     a pid (agents must not need a handle on something they cannot kill).
     """
-    from exo_control.policy import parse_confirm
+    from exo_control.policy import confirm_ok
 
-    if not parse_confirm(confirm):
+    if not confirm_ok(confirm, kind="proc_kill"):
         return {"ok": False, "error": "proc kill requires confirm=true"}
 
+    from exo_control.trust import unrestricted
+
+    owner = unrestricted()
     name_s = (name or "").strip()
-    if name_s and is_protected_process(name_s):
+    if name_s and is_protected_process(name_s) and not owner:
         return {
             "ok": False,
             "error": "protected_process",
@@ -150,7 +153,7 @@ def kill_proc(
         if pid_i <= 0:
             return {"ok": False, "error": "invalid pid"}
         pname = _proc_name_for_pid(pid_i)
-        if not pname:
+        if not pname and not owner:
             return {
                 "ok": False,
                 "error": "unresolved_process",
@@ -159,7 +162,7 @@ def kill_proc(
                 "denied": True,
                 "hint": "could not resolve process name; refuse to taskkill an unnamed PID",
             }
-        if is_protected_process(pname):
+        if pname and is_protected_process(pname) and not owner:
             return {
                 "ok": False,
                 "error": "protected_process",
@@ -173,9 +176,8 @@ def kill_proc(
         targets = find_pids_by_name(name_s)
         if not targets:
             return {"ok": False, "error": "no matching process", "name": name_s}
-        # Re-check resolved names (list may lag; still deny if any protected).
         for t in targets:
-            if is_protected_process(str(t.get("name") or "")):
+            if is_protected_process(str(t.get("name") or "")) and not owner:
                 return {
                     "ok": False,
                     "error": "protected_process",
@@ -194,17 +196,28 @@ def kill_proc(
         tname = str(t.get("name") or "")
         try:
             if os.name == "nt":
-                # No /T — do not kill an unknown child tree (anti-cheat, explorer).
-                completed = _run(["taskkill", "/PID", str(tpid), "/F"], timeout=10)
+                cmd = ["taskkill", "/PID", str(tpid), "/F"]
+                if owner:
+                    cmd.append("/T")
+                completed = _run(cmd, timeout=10)
                 ok = completed.returncode == 0
-                results.append({
+                row = {
                     "ok": ok,
                     "pid": tpid,
                     "name": tname,
                     "stdout": (completed.stdout or "").strip()[:300],
                     "stderr": (completed.stderr or "").strip()[:300],
-                })
-                all_ok = all_ok and ok
+                }
+                if not ok:
+                    from exo_control.elevate import retry_if_needed
+
+                    row = retry_if_needed(
+                        "kill_proc",
+                        {**row, "error": (completed.stderr or completed.stdout or "taskkill failed").strip()[:300]},
+                        {"pid": tpid, "name": tname},
+                    )
+                results.append(row)
+                all_ok = all_ok and bool(row.get("ok"))
             else:
                 os.kill(tpid, 9)
                 results.append({"ok": True, "pid": tpid, "name": tname})
@@ -304,9 +317,9 @@ def service_status(name: str) -> Dict[str, Any]:
 def service_control(name: str, action: str, *, confirm: bool = False) -> Dict[str, Any]:
     if os.name != "nt":
         return {"ok": False, "error": "services require Windows"}
-    from exo_control.policy import CRITICAL_SERVICES, parse_confirm
+    from exo_control.policy import CRITICAL_SERVICES, confirm_ok
 
-    if not parse_confirm(confirm):
+    if not confirm_ok(confirm, kind="service_control"):
         return {"ok": False, "error": "service_control requires confirm=true"}
     name = (name or "").strip()
     action = (action or "").strip().lower()
@@ -314,7 +327,9 @@ def service_control(name: str, action: str, *, confirm: bool = False) -> Dict[st
         return {"ok": False, "error": "service name required"}
     if action not in {"start", "stop", "restart"}:
         return {"ok": False, "error": f"unsupported action: {action}"}
-    if name.lower() in CRITICAL_SERVICES:
+    from exo_control.trust import unrestricted
+
+    if name.lower() in CRITICAL_SERVICES and not unrestricted():
         return {
             "ok": False,
             "error": "critical_service",
@@ -331,7 +346,7 @@ def service_control(name: str, action: str, *, confirm: bool = False) -> Dict[st
         out = (completed.stdout or "").strip()
         err = (completed.stderr or "").strip()
         ok = completed.returncode == 0
-        return {
+        result = {
             "ok": ok,
             "name": name,
             "action": action,
@@ -339,6 +354,11 @@ def service_control(name: str, action: str, *, confirm: bool = False) -> Dict[st
             "stderr": err[:400],
             "error": None if ok else (err or out or f"sc exit {completed.returncode}")[:400],
         }
+        if ok:
+            return result
+        from exo_control.elevate import retry_if_needed
+
+        return retry_if_needed("service_control", result, {"name": name, "action": action})
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "name": name, "action": action}
 

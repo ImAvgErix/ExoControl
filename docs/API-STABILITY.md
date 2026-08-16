@@ -1,6 +1,8 @@
 # API stability (v2.x)
 
-2.2 is additive across Waves 1–5 (Perplexity, Browser Use, ego status, Firecrawl through Screenpipe, Graph/Jina/git, Windows desk, Docling/RAG/SaaS/shells, then Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/sys status). Existing op names stay. Remote CDP is still denied except Browser Use (API key) or `EXO_ALLOW_REMOTE_CDP=1`. `browser_act` / `browser_query` / `browser_extract` are HTTP aliases and do **not** require a desktop lease. Cookie values and Graph/SaaS writes need `confirm=true`. No LSASS/UAC/anti-cheat/captcha ops.
+2.4 is additive: `find`, `pc` snapshot, audio/power/network/wifi/package/recycle/wallpaper/settings, file hash/zip/watch, right/double click + menu + clipboard chords, trust/elevate/broker, `web_task`, session memory. Existing op names stay. Sleep / wifi_connect / recycle_empty / package install / wallpaper set still need `confirm=true` in default/trusted.
+
+2.2 is additive across Waves 1-5 (Perplexity, Browser Use, ego status, Firecrawl through Screenpipe, Graph/Jina/git, Windows desk, Docling/RAG/SaaS/shells, then Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/sys status) plus live seat / Pilot. Existing op names stay. Remote CDP is still denied except Browser Use (API key), `EXO_ALLOW_REMOTE_CDP=1`, or Full-Trust. `browser_act` / `browser_query` / `browser_extract` are HTTP aliases and do **not** require a desktop lease. Cookie values and Graph/SaaS writes need `confirm=true`. No LSASS/UAC/anti-cheat/captcha ops.
 
 2.1 is additive: `scroll_into_view`, `hover`, `eyes_read`/`look`/`glance`, `browser_scroll_into_view`, `browser_hover`, and `seen` on hand results. Existing op names stay.
 

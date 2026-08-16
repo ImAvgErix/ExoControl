@@ -183,13 +183,15 @@ class BrowserEngine:
 
         if not HAS_PLAYWRIGHT:
             return {"ok": False, "error": "playwright missing"}
-        if not is_allowed_cdp_endpoint(endpoint):
+        from exo_control.trust import unrestricted
+
+        if not is_allowed_cdp_endpoint(endpoint) and not unrestricted():
             return {
                 "ok": False,
                 "error": "cdp_not_loopback",
                 "endpoint": endpoint,
                 "loopback": is_loopback_endpoint(endpoint),
-                "hint": "loopback CDP, Browser Use (BROWSER_USE_API_KEY), or EXO_ALLOW_REMOTE_CDP=1",
+                "hint": "loopback CDP, Browser Use (BROWSER_USE_API_KEY), EXO_ALLOW_REMOTE_CDP=1, or Full-Trust",
             }
         if self._pw is None:
             self._pw = await async_playwright().start()
@@ -953,7 +955,6 @@ class BrowserEngine:
         space = self._get_space(space_id)
         await space.page.go_back()
         return {"ok": True, "url": space.page.url, "space_id": space.id}
-
     async def forward(self, space_id: Optional[str] = None) -> Dict[str, Any]:
         await self.ensure_started()
         space = self._get_space(space_id)
@@ -1047,8 +1048,7 @@ class BrowserEngine:
     async def viewport(
         self,
         width: Optional[int] = None,
-        height: Optional[int] = None,
-        space_id: Optional[str] = None,
+        height: Optional[int] = None,        space_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self.ensure_started()
         space = self._get_space(space_id)
@@ -1056,6 +1056,20 @@ class BrowserEngine:
             await space.page.set_viewport_size({"width": int(width), "height": int(height)})
         size = space.page.viewport_size or {"width": width, "height": height}
         return {"ok": True, "width": size.get("width"), "height": size.get("height")}
+
+    async def extract(self, space_id: Optional[str] = None, max_chars: int = 4000) -> Dict[str, Any]:
+        snap = await self.snapshot(space_id, include_screenshot=False, max_text_chars=max_chars)
+        if not isinstance(snap, dict):
+            return {"ok": False, "error": "snapshot failed"}
+        sample = str(snap.get("text_sample") or "")[:max_chars]
+        return {
+            "ok": True,
+            "title": snap.get("title"),
+            "url": snap.get("url"),
+            "text": sample,
+            "chars": len(sample),
+            "element_count": snap.get("element_count") or len(snap.get("elements") or []),
+        }
 
     async def close_space(self, space_id: str) -> Dict[str, Any]:
         if space_id == "default":
@@ -1213,6 +1227,21 @@ class BrowserEngineSync:
 
     def fill_form(self, fields, space_id=None):
         return self._run(self._engine.fill_form(fields, space_id=space_id))
+
+    def back(self, space_id=None):
+        return self._run(self._engine.back(space_id))
+
+    def forward(self, space_id=None):
+        return self._run(self._engine.forward(space_id))
+
+    def tabs(self, space_id=None):
+        return self._run(self._engine.tabs(space_id))
+
+    def extract(self, space_id=None, max_chars: int = 4000):
+        return self._run(self._engine.extract(space_id, max_chars=max_chars))
+
+    def select(self, value=None, selector=None, ref=None, space_id=None):
+        return self._run(self._engine.select(value=value, selector=selector, ref=ref, space_id=space_id))
 
     def close_space(self, space_id: str):
         return self._run(self._engine.close_space(space_id))

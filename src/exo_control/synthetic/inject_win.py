@@ -78,19 +78,28 @@ if IS_WIN:
         inp.union.mi = MOUSEINPUT(ax, ay, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, 0, None)
         return user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) == 1
 
-    def click_abs(x: int, y: int, button: str = "left") -> bool:
+    def click_abs(x: int, y: int, button: str = "left", clicks: int = 1) -> bool:
         if not move_abs(x, y):
             return False
         time.sleep(0.01)
-        down = MOUSEEVENTF_LEFTDOWN if button == "left" else MOUSEEVENTF_RIGHTDOWN
-        up = MOUSEEVENTF_LEFTUP if button == "left" else MOUSEEVENTF_RIGHTUP
-        for flag in (down, up):
-            inp = INPUT()
-            inp.type = INPUT_MOUSE
-            inp.union.mi = MOUSEINPUT(0, 0, 0, flag, 0, None)
-            if user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
-                return False
-            time.sleep(0.01)
+        btn = (button or "left").lower()
+        if btn in {"right", "r"}:
+            down, up = MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP
+        elif btn in {"middle", "mid", "m"}:
+            down, up = 0x0020, 0x0040  # MOUSEEVENTF_MIDDLEDOWN / UP
+        else:
+            down, up = MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP
+        n = max(1, min(3, int(clicks or 1)))
+        for i in range(n):
+            for flag in (down, up):
+                inp = INPUT()
+                inp.type = INPUT_MOUSE
+                inp.union.mi = MOUSEINPUT(0, 0, 0, flag, 0, None)
+                if user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+                    return False
+                time.sleep(0.01)
+            if i + 1 < n:
+                time.sleep(0.04)
         return True
 
     def cursor_pos() -> Optional[Tuple[int, int]]:

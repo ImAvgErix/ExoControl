@@ -100,6 +100,14 @@ def registry_read(path: str, max_values: int = 40) -> Dict[str, Any]:
             pass
 
 
+def _hive_write_allowed(hive_name: str) -> bool:
+    if hive_name == "HKEY_CURRENT_USER":
+        return True
+    from exo_control.trust import unrestricted
+
+    return unrestricted()
+
+
 def registry_write(
     path: str,
     name: str,
@@ -114,11 +122,17 @@ def registry_write(
     hive_name, key, err = _parse_path(path)
     if err:
         return {"ok": False, "error": err}
-    if hive_name == "HKEY_LOCAL_MACHINE":
-        return {"ok": False, "error": "HKLM write denied", "hive": hive_name, "key": key}
-    if hive_name != "HKEY_CURRENT_USER":
-        return {"ok": False, "error": f"write denied for hive {hive_name}", "hive": hive_name}
-    if not confirm:
+    if not _hive_write_allowed(hive_name):
+        return {
+            "ok": False,
+            "error": f"{hive_name} write denied (default/trusted). Full-Trust owner mode required.",
+            "hive": hive_name,
+            "key": key,
+        }
+    from exo_control.policy import confirm_ok
+
+    kind = "hklm" if hive_name == "HKEY_LOCAL_MACHINE" else "registry_write"
+    if not confirm_ok(confirm, kind=kind):
         return {"ok": False, "error": "registry_write requires confirm=true", "hive": hive_name, "key": key}
     hive = getattr(winreg, hive_name)
     typ_map = {
@@ -156,4 +170,97 @@ def registry_write(
             "value": data,
         }
     except OSError as exc:
-        return {"ok": False, "error": f"write failed: {exc}", "hive": hive_name, "key": key}
+        failed = {"ok": False, "error": f"write failed: {exc}", "hive": hive_name, "key": key}
+        from exo_control.elevate import retry_if_needed
+
+        return retry_if_needed(
+            "registry_write",
+            failed,
+            {"path": path, "name": name, "value": value, "value_type": value_type},
+        )
+
+
+def registry_delete(
+    path: str,
+    name: Optional[str] = None,
+    *,
+    recursive: bool = False,
+    confirm: bool = False,
+) -> Dict[str, Any]:
+    """Delete a value (when ``name``) or a key."""
+    winreg = _winreg()
+    if winreg is None:
+        return {"ok": False, "error": "registry ops require Windows"}
+    hive_name, key, err = _parse_path(path)
+    if err:
+        return {"ok": False, "error": err}
+    if not _hive_write_allowed(hive_name):
+        return {
+            "ok": False,
+            "error": f"{hive_name} delete denied (default/trusted). Full-Trust owner mode required.",
+            "hive": hive_name,
+            "key": key,
+        }
+    from exo_control.policy import confirm_ok
+
+    kind = "hklm" if hive_name == "HKEY_LOCAL_MACHINE" else "registry_write"
+    if not confirm_ok(confirm, kind=kind):
+        return {"ok": False, "error": "registry_delete requires confirm=true", "hive": hive_name, "key": key}
+    hive = getattr(winreg, hive_name)
+    try:
+        if name is not None:
+            handle = winreg.OpenKey(hive, key or "", 0, winreg.KEY_SET_VALUE)
+            try:
+                winreg.DeleteValue(handle, str(name))
+            finally:
+                winreg.CloseKey(handle)
+            return {"ok": True, "hive": hive_name, "key": key, "deleted": "value", "name": str(name)}
+        if not key:
+            return {"ok": False, "error": "refusing to delete a hive root", "hive": hive_name}
+        if recursive:
+            _delete_key_tree(winreg, hive, key)
+        else:
+            parent, _, leaf = key.rpartition("\\")
+            handle = winreg.OpenKey(hive, parent, 0, winreg.KEY_WRITE)
+            try:
+                winreg.DeleteKey(handle, leaf)
+            finally:
+                winreg.CloseKey(handle)
+        return {"ok": True, "hive": hive_name, "key": key, "deleted": "key", "recursive": bool(recursive)}
+    except FileNotFoundError:
+        return {"ok": True, "hive": hive_name, "key": key, "deleted": "missing", "name": name}
+    except OSError as exc:
+        failed = {"ok": False, "error": f"delete failed: {exc}", "hive": hive_name, "key": key}
+        from exo_control.elevate import retry_if_needed
+
+        return retry_if_needed(
+            "registry_delete",
+            failed,
+            {"path": path, "name": name, "recursive": recursive},
+        )
+
+
+def _delete_key_tree(winreg, hive, key: str) -> None:
+    try:
+        handle = winreg.OpenKey(hive, key, 0, winreg.KEY_READ | winreg.KEY_WRITE)
+    except FileNotFoundError:
+        return
+    try:
+        while True:
+            try:
+                sub = winreg.EnumKey(handle, 0)
+            except OSError:
+                break
+            _delete_key_tree(winreg, hive, key + "\\" + sub)
+        winreg.CloseKey(handle)
+    except Exception:
+        try:
+            winreg.CloseKey(handle)
+        except Exception:
+            pass
+    parent, _, leaf = key.rpartition("\\")
+    ph = winreg.OpenKey(hive, parent, 0, winreg.KEY_WRITE)
+    try:
+        winreg.DeleteKey(ph, leaf)
+    finally:
+        winreg.CloseKey(ph)

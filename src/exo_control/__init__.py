@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__version__ = "2.2.0"
-
+__version__ = "2.5.0"
 # Preferred public names. Heavy modules load on first attribute access.
 __all__ = [
     "ExoExecEngine",

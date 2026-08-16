@@ -75,13 +75,32 @@ def parse_confirm(value: Any) -> bool:
     return False
 
 
+def confirm_ok(value: Any, *, kind: str = "destructive") -> bool:
+    """Confirm assertion, or Full-Trust making this kind optional."""
+    from exo_control.trust import confirm_ok as _trust_confirm_ok
+
+    return _trust_confirm_ok(value, kind=kind)
+
+
 def allow_force_release() -> bool:
-    return env_flag("EXO_ALLOW_FORCE_RELEASE", "AETHER_ALLOW_FORCE_RELEASE", default=False)
+    if env_flag("EXO_ALLOW_FORCE_RELEASE", "AETHER_ALLOW_FORCE_RELEASE", default=False):
+        return True
+    from exo_control.trust import full_trust_active
+
+    return full_trust_active()
 
 
 def allow_outside_roots() -> bool:
-    """Operator must opt in before confirm can touch paths outside allowroots."""
-    return env_flag("EXO_ALLOW_OUTSIDE_ROOTS", "AETHER_ALLOW_OUTSIDE_ROOTS", default=False)
+    """Operator must opt in before confirm can touch paths outside allowroots.
+
+    Full-Trust / elevated broker unlock the disk. Default/trusted still need
+    ``EXO_ALLOW_OUTSIDE_ROOTS=1``.
+    """
+    if env_flag("EXO_ALLOW_OUTSIDE_ROOTS", "AETHER_ALLOW_OUTSIDE_ROOTS", default=False):
+        return True
+    from exo_control.trust import unrestricted
+
+    return unrestricted()
 
 
 def allow_env_values() -> bool:
@@ -106,7 +125,9 @@ def live_eyes_enabled() -> bool:
 
 
 def max_lease_ttl_sec() -> float:
-    return float(max(5, env_int("EXO_LEASE_MAX_TTL", "AETHER_LEASE_MAX_TTL", default=1800)))
+    from exo_control.trust import max_lease_ttl_sec as _trust_ttl
+
+    return _trust_ttl(default=env_int("EXO_LEASE_MAX_TTL", "AETHER_LEASE_MAX_TTL", default=1800))
 
 
 def is_secret_env_name(name: str) -> bool:
@@ -223,6 +244,9 @@ def identity() -> Dict[str, Any]:
     import exo_control as aether
 
     path = getattr(aether, "__file__", "") or ""
+    from exo_control.trust import snapshot_for_identity
+    from exo_control.elevate import elevate_disabled, is_admin, should_escalate
+
     return {
         "product": PRODUCT,
         "version": __version__,
@@ -237,6 +261,12 @@ def identity() -> Dict[str, Any]:
             "live_eyes": live_eyes_enabled(),
             "allow_remote_cdp": allow_remote_cdp(),
             "max_lease_ttl_sec": max_lease_ttl_sec(),
+            "trust": snapshot_for_identity(),
+            "elevate": {
+                "admin": is_admin(),
+                "should_escalate": should_escalate(),
+                "disabled": elevate_disabled(),
+            },
         },
     }
 

@@ -19,6 +19,9 @@ def test_readme_prefers_exo_control_mcp_entry():
 
 def test_agents_md_exists_for_any_model():
     from pathlib import Path
-    text = Path("AGENTS.md").read_text(encoding="utf-8")
+    # Product contract lives in the skill + harness docs (repo AGENTS.md is not used).
+    skill = Path("skills/exo-control/SKILL.md").read_text(encoding="utf-8")
+    harness = Path("docs/HARNESS.md").read_text(encoding="utf-8")
+    text = skill + "\n" + harness
     assert "lease_acquire" in text
     assert "exo_exec" in text

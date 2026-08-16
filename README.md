@@ -16,7 +16,7 @@
 <p align="center">
   <a href="#install"><strong>Install</strong></a>
   ·
-  <a href="AGENTS.md">Agent instructions</a>
+  <a href="docs/HARNESS.md">Harness</a>
   ·
   <a href="SECURITY.md">Safety</a>
   ·
@@ -40,10 +40,15 @@ pip install exo-control
 exo-control doctor
 ```
 
-Optional browser CDP: `pip install "exo-control[browser]"` then `playwright install chromium`.
+Optional extras:
 
-Pin: `pip install "exo-control==2.2.0"` or `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"`.
+```bash
+pip install "exo-control[browser]"   # Playwright CDP
+playwright install chromium
+pip install "exo-control[web]"       # Browser Use web expert (optional)
+```
 
+Pin: `pip install "exo-control==2.4.0"` or `pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.4.0"`.
 State lives under `~/.exo/`. Legacy `~/.aether/` is migrated automatically.
 
 ## MCP
@@ -86,7 +91,7 @@ ExoExecEngine().execute({
 })
 ```
 
-Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{"op":"last_error"}`. Drop [AGENTS.md](AGENTS.md) into any model's rules.
+Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{"op":"last_error"}`. Harness install is in [docs/HARNESS.md](docs/HARNESS.md).
 
 ## What it can do
 
@@ -110,25 +115,46 @@ Failed steps do not attach screenshots unless `screenshot_on_fail: true`. Use `{
 | **Live seat** | `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID |
 
 Key-gated rows fail closed; `{"op":"ready"}` is the map; `stt` is a stub.
+| **Desktop** | UIA click/type/fill, right/double click, menu, copy/paste, aimed wheel + `scroll_into_view` + hover, live eyes, `find`, lease, multi-monitor, window move/resize/snap |
+| **Browser** | CDP snapshot refs, DOM click/type, page scroll, tabs/back/extract; `web_task` for multi-step jobs |
+| **OS** | Allowrooted files (+ hash/zip/watch/reveal), HKCU registry, processes/services, drives, `os_info`, audio/power/idle, wifi, recycle, winget, `ms-settings:` |
+| **Session** | Persistent prefs, plan, checkpoint, recover |
 
-`{"op":"help"}` lists the core ops. `detail=true` is the full catalog.
+`{"op":"help"}` lists the core ops. `detail=true` is the full catalog. `find` searches the last read. `pc` is the owner snapshot (volume, power, idle, wifi). `exo-control pc` from a shell.
 
 ## Safety
 
 - One desktop lease; `lease_status` / `session_status` never return the token
-- Destructive OS ops need `confirm=true` (agent assertion, not a human prompt)
-- Files stay in `EXO_FILE_ROOTS` unless the operator sets `EXO_ALLOW_OUTSIDE_ROOTS=1`
-- Hard denies: anti-cheat, unnamed PID kill, critical services, non-loopback CDP
+- Destructive OS ops need `confirm=true` (agent assertion, not a human prompt) unless **Full-Trust** is on
+- Files stay in `EXO_FILE_ROOTS` unless the operator sets `EXO_ALLOW_OUTSIDE_ROOTS=1` (Full-Trust widens *user-profile* roots only)
+- Hard denies in **default/trusted**: anti-cheat, unnamed PID kill, critical services, HKLM write, Windows/System32 writes, non-loopback CDP
+- **Full-Trust owner mode** lifts those denials and auto-elevates privileged ops through a broker (MCP stays medium IL). First admin op may UAC once.
+- Human kill-switch: create `~/.exo/KILL` or `exo-control trust kill` — agents cannot disarm it
+
 - [SECURITY.md](SECURITY.md)
+
+### Full-Trust (“this is my PC”)
+
+Default install stays safe. Full-Trust is explicit and reversible:
+
+1. `exo-control trust enable --ack "I own this PC"` (one-time human ack + audit log)
+2. Set `EXO_TRUST=full` (or `EXO_FULL_TRUST=1`) on the MCP/CLI process and restart it
+3. `exo-control trust status` should show `"level": "full"`
+
+While Full-Trust is on, confirms are optional, the disk is in play, and privileged OS ops (HKLM, Program Files, services, anti-cheat) go through an elevated broker. The desktop MCP stays unelevated so clicks still work. One UAC to install the broker; after that it starts with the logon task.
+
+    exo-control elevate status
+    exo-control elevate install
+
+Create `~/.exo/KILL` to freeze hands immediately. That file is the only remaining agent-proof stop.
 
 ## Docs
 
 | Doc | Role |
 |-----|------|
-| [AGENTS.md](AGENTS.md) | Drop-in agent instructions |
 | [docs/HARNESS.md](docs/HARNESS.md) | Host install matrix |
 | [docs/LIVE-MODEL.md](docs/LIVE-MODEL.md) | Lease / eyes / hands |
-| [docs/API-STABILITY.md](docs/API-STABILITY.md) | 2.x public surface |
+| [docs/CAPABILITY.md](docs/CAPABILITY.md) | Capability bar || [docs/API-STABILITY.md](docs/API-STABILITY.md) | 2.x public surface |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 
 ## License

@@ -25,6 +25,7 @@ from exo_control.pilot_ops import META_OPS, Pilot
 from exo_control.session_ops import LiveSeat
 from exo_control.policy import (
     allow_screenshot_on_fail_default,
+    confirm_ok,
     deny_browser_eval,
     identity,
     is_dangerous_launch,
@@ -35,7 +36,7 @@ from exo_control.policy import (
 )
 
 
-MAX_STEPS = 64
+MAX_STEPS = 128
 MAX_WAIT_SECONDS = 60.0
 
 # Generated from ops_catalog.OPS — do not hand-edit.
@@ -126,6 +127,7 @@ class ExoExecEngine:
         )
         self._browser = None
         self._script_lease_token: Optional[str] = None
+        self._session_agent_id: Optional[str] = None
         self._action_log: List[Dict[str, Any]] = []
         self._last_browser_refs: List[Any] = []
         self._desktop_refs: Dict[str, Dict[str, Any]] = {}
@@ -199,12 +201,14 @@ class ExoExecEngine:
         """Stamp short-lived ``eN`` refs on read/observe elements for this script."""
         if not isinstance(value, dict):
             return value
-        elements = value.get("elements")
+        used_hits = isinstance(value.get("hits"), list) and bool(value.get("hits"))
+        elements = value.get("hits") if used_hits else value.get("elements")
         if not isinstance(elements, list) or not elements:
             # compact_observe uses a11y list
             a11y = value.get("a11y")
             if isinstance(a11y, list) and a11y:
                 elements = a11y
+                used_hits = False
             else:
                 return value
         pid = value.get("pid") or value.get("focus_pid") or getattr(self.ctrl, "_focus_pid", None)
@@ -225,7 +229,9 @@ class ExoExecEngine:
                 "ref": ref,
                 "element_index": int(idx) if idx is not None else i,
                 "name": el.get("name") or el.get("label") or "",
-                "role": el.get("role"),
+                "role": el.get("role") or el.get("kind"),
+                "kind": el.get("kind") or el.get("role"),
+                "source": el.get("source"),
                 "pid": int(pid) if pid is not None else None,
                 "window_id": int(window_id) if window_id is not None else None,
                 "bbox": el.get("bbox"),
@@ -235,10 +241,14 @@ class ExoExecEngine:
             el["ref"] = ref
             stamped.append(el)
             ref_ids.append(ref)
-        if value.get("elements") is not None:
-            value = {**value, "elements": stamped, "refs": ref_ids}
+        if used_hits:
+            value = {**value, "hits": stamped, "refs": ref_ids}
+        elif value.get("elements") is not None:
+            value = {**value, "elements": stamped, "refs": ref_ids, "hits": stamped}
         elif value.get("a11y") is not None:
-            value = {**value, "a11y": stamped, "refs": ref_ids}
+            value = {**value, "a11y": stamped, "refs": ref_ids, "hits": stamped}
+        else:
+            value = {**value, "hits": stamped, "refs": ref_ids}
         return value
 
     def _resolve_ref(self, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -249,7 +259,77 @@ class ExoExecEngine:
         hit = self._desktop_refs.get(key)
         if hit is None and key.isdigit():
             hit = self._desktop_refs.get(f"e{key}")
+        if hit is None:
+            from exo_control import session as exo_session
+            cached = exo_session.lookup_hit(ref=key)
+            if cached is None and key.isdigit():
+                cached = exo_session.lookup_hit(ref=f"e{key}")
+            if cached is not None:
+                hit = self._hit_to_desktop_ref(cached)
         return hit
+
+    def _hit_to_desktop_ref(self, hit: Dict[str, Any]) -> Dict[str, Any]:
+        bbox = hit.get("bbox")
+        x = y = None
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            try:
+                x = (int(bbox[0]) + int(bbox[2])) // 2
+                y = (int(bbox[1]) + int(bbox[3])) // 2
+            except Exception:
+                x = y = None
+        return {
+            "ref": hit.get("ref"),
+            "element_index": hit.get("element_index"),
+            "name": hit.get("label") or "",
+            "role": hit.get("kind"),
+            "kind": hit.get("kind"),
+            "pid": hit.get("pid") or getattr(self.ctrl, "_focus_pid", None),
+            "window_id": hit.get("window_id") or getattr(self.ctrl, "_focus_window_id", None),
+            "bbox": bbox,
+            "x": x,
+            "y": y,
+            "source": hit.get("source"),
+        }
+
+    def _stash_observe_hits(self, value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        from exo_control import session as exo_session
+        raw: List[Any] = []
+        if isinstance(value.get("hits"), list) and value["hits"]:
+            raw = list(value["hits"])
+        else:
+            for key in ("elements", "a11y", "ocr"):
+                items = value.get(key)
+                if isinstance(items, list):
+                    raw.extend(items)
+        pid = value.get("pid") or value.get("focus_pid") or getattr(self.ctrl, "_focus_pid", None)
+        window_id = value.get("window_id") or getattr(self.ctrl, "_focus_window_id", None)
+        stamped: List[Dict[str, Any]] = []
+        for i, el in enumerate(raw):
+            if not isinstance(el, dict):
+                continue
+            item = dict(el)
+            item.setdefault("ref", f"e{i}")
+            if pid is not None and item.get("pid") is None:
+                item["pid"] = pid
+            if window_id is not None and item.get("window_id") is None:
+                item["window_id"] = window_id
+            stamped.append(item)
+        exo_session.replace_hits(stamped)
+
+    def _reload_session_hits(self) -> None:
+        try:
+            from exo_control import session as exo_session
+            for h in exo_session.get_hits():
+                if not isinstance(h, dict):
+                    continue
+                ref = h.get("ref")
+                if not ref:
+                    continue
+                self._desktop_refs[str(ref)] = self._hit_to_desktop_ref(h)
+        except Exception:
+            pass
 
     def _capture_fail_evidence(self, max_side: int = 900, quality: int = 55) -> Optional[Dict[str, Any]]:
         """Compact JPEG of focused window/monitor — no lease required (debug path)."""
@@ -326,6 +406,7 @@ class ExoExecEngine:
             if op.startswith("wait") or op in {
                 "focus", "smart_focus", "verify", "verify_ui",
                 "observe", "compact_observe", "read_ui", "read",
+                "watch_file", "watch_proc", "find", "locate",
             }:
                 value = self._run_step_bounded(
                     op, work, timeout_s=float(work.get("timeout", 14.0))
@@ -337,6 +418,8 @@ class ExoExecEngine:
         value = _normalize_result(op, value)
         if op in {"read", "read_ui", "observe", "compact_observe"} and _step_ok(value):
             value = self._register_desktop_refs(value)
+            if op in {"observe", "compact_observe"}:
+                self._stash_observe_hits(value)
         if op == "launch" and _step_ok(value) and value.get("pid"):
             try:
                 self._script_launched_pids.append(int(value["pid"]))
@@ -371,21 +454,23 @@ class ExoExecEngine:
                 evidence = self._capture_fail_evidence()
                 if evidence is not None:
                     value = {**value, "fail_screenshot": evidence}
-            self._last_error = {
-                "ok": False,
-                "step": index,
-                "op": op,
-                "error": value.get("error") or value.get("message") or value.get("missing"),
-                "result": {
-                    k: value.get(k)
-                    for k in (
-                        "ok", "error", "message", "missing", "found", "blocked",
-                        "denied", "reason", "title", "path",
-                    )
-                    if k in value
-                },
-                "ts": time.time(),
-            }
+            # finally failures must not hide the main-script error.
+            if not (tag == "finally" and self._last_error is not None):
+                self._last_error = {
+                    "ok": False,
+                    "step": index,
+                    "op": op,
+                    "error": value.get("error") or value.get("message") or value.get("missing"),
+                    "result": {
+                        k: value.get(k)
+                        for k in (
+                            "ok", "error", "message", "missing", "found", "blocked",
+                            "denied", "reason", "title", "path",
+                        )
+                        if k in value
+                    },
+                    "ts": time.time(),
+                }
         entry = {
             "step": index,
             "op": op,
@@ -416,6 +501,7 @@ class ExoExecEngine:
         acquired_this_script = False
         released_this_script = False
         self._desktop_refs = {}
+        self._reload_session_hits()
         self._script_launched_pids = []
         if self._skill_depth == 0:
             self._pilot.reset_script()
@@ -535,9 +621,15 @@ class ExoExecEngine:
         if op == "desktop":
             action = str(step.get("action") or "list").lower()
             needs = action in {"switch", "goto", "set"}
+        if op in {"package", "winget", "pc"}:
+            action = str(step.get("action") or step.get("mode") or ("status" if op == "pc" else "list")).lower()
+            if action in {"install", "add", "sleep", "lock", "wifi_connect", "recycle_empty", "wallpaper", "settings_open"}:
+                needs = True
         # Catalog lease-free wins — including browser_act / browser_query HTTP aliases.
         if op in LEASE_FREE_OPS:
             needs = False
+        if op in {"web_task", "web_act", "recover", "focus_restore"}:
+            needs = True
         if not needs:
             return None
         token = self._lease_token(step)
@@ -555,6 +647,10 @@ class ExoExecEngine:
             "session_close", "leave_seat", "session_end",
             "session_status", "seat_status",
             "list_cursors", "cursors",
+            "trust_status", "trust_enable", "elevate_status", "os_info", "drives", "which",
+            "session_status", "session_start", "session_end", "session_recall",
+            "session_memory_end", "session_memory_status", "session_checkpoint",
+            "remember", "recall", "note", "plan",
         }:
             return False
         if op in LEASE_FREE_OPS:
@@ -618,7 +714,7 @@ class ExoExecEngine:
         safety = self._ensure_safety()
         kind = "click" if op in {"click", "smart_click", "browser_click"} else "action"
         text = self._step_safety_text(op, step)
-        confirm = parse_confirm(step.get("confirm"))
+        confirm = step.get("confirm")
         ok, why = safety.check(kind=kind, text=text, confirm=confirm, record=True)
         if not ok:
             return {"ok": False, "success": False, "error": why, "blocked": True}
@@ -735,7 +831,9 @@ class ExoExecEngine:
     def _require_focus(self, op: str, step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Hard-fail click/type/fill/keys/wheel when nothing is focused."""
         if op not in {
-            "click", "smart_click", "type", "smart_type", "fill",
+            "click", "smart_click", "right_click", "context_click", "double_click",
+            "type", "smart_type", "fill", "copy", "paste", "select_all",
+            "menu", "context_menu",
             "keys", "press", "hotkey", "smart_hotkey",
             "scroll", "smart_scroll", "scroll_into_view", "into_view", "hover",
         }:
@@ -878,7 +976,30 @@ class ExoExecEngine:
         value = self._maybe_compact_result(op, step, value)
         self._record_action(op, step, value)
         value = self._maybe_attach_seen(op, step, value)
+        self._maybe_autorenew(op, step, value)
         return value
+
+    def _maybe_autorenew(self, op: str, step: Dict[str, Any], value: Any) -> None:
+        from exo_control.trust import default_lease_ttl_sec, full_trust_active
+
+        if not full_trust_active() or not self._script_lease_token:
+            return
+        if not self._is_mutating_op(op, step):
+            return
+        if isinstance(value, Mapping) and (value.get("ok") is False or value.get("success") is False):
+            return
+        try:
+            desktop_lease.renew(self._script_lease_token, ttl_sec=default_lease_ttl_sec())
+        except Exception:
+            pass
+        agent = self._session_agent_id
+        if agent:
+            try:
+                from exo_control import session as exo_session
+
+                exo_session.bump_stat(agent, "hands")
+            except Exception:
+                pass
 
     def _maybe_compact_result(self, op: str, step: Dict[str, Any], value: Any) -> Any:
         """Compact eyes/snapshot payloads unless step.verbose is True."""
@@ -911,7 +1032,8 @@ class ExoExecEngine:
         return compact_payload(value, verbose=verbose)
 
     _SEEN_AFTER = frozenset({
-            "click", "smart_click", "type", "smart_type", "fill",
+        "click", "smart_click", "right_click", "context_click", "double_click",
+        "type", "smart_type", "fill", "copy", "paste", "select_all", "menu", "context_menu",
         "scroll", "smart_scroll", "scroll_into_view", "into_view", "hover",
         "drag", "smart_drag", "hotkey", "smart_hotkey", "keys", "press",
         "pointer", "mouse", "keypress", "drive",
@@ -979,7 +1101,9 @@ class ExoExecEngine:
 
     def _session_close(self, step: Dict[str, Any]) -> Dict[str, Any]:
         from exo_control import session_ops
+        from exo_control import session as exo_session
 
+        exo_session.clear_hits()
         token = self._lease_token(step) or self._script_lease_token or str(step.get("token") or "")
         if not token:
             self._clear_seat()
@@ -1052,27 +1176,88 @@ class ExoExecEngine:
             monitor=monitor if monitor is not None else getattr(ctrl, "_focus_monitor", None),
         )
 
+    _LIGHT_SEEN_AFTER = frozenset({
+        "click", "smart_click", "right_click", "context_click", "double_click",
+        "type", "smart_type", "fill",
+    })
+
+    def _claimed_label(self, step: Dict[str, Any], value: Dict[str, Any]) -> Optional[str]:
+        tgt = value.get("target")
+        if isinstance(tgt, dict) and tgt.get("label"):
+            return str(tgt["label"])
+        for key in ("query", "label", "ref"):
+            if step.get(key):
+                return str(step[key])
+        return None
+
+    def _strip_seen_blobs(self, seen: Dict[str, Any]) -> Dict[str, Any]:
+        skip = ("screenshot", "jpeg", "jpg", "base64", "image")
+        return {
+            k: v for k, v in seen.items()
+            if not any(tok in str(k).lower() for tok in skip)
+        }
+
     def _maybe_attach_seen(self, op: str, step: Dict[str, Any], value: Any) -> Any:
-        if step.get("seen") is False or not live_eyes_enabled():
+        if step.get("seen") is False:
             return value
         if op not in self._SEEN_AFTER:
             return value
         if not isinstance(value, dict) or not _step_ok(value):
             return value
         ctrl = self.ctrl
-        eyes = getattr(ctrl, "_eyes", None)
-        if eyes is None or not getattr(eyes, "_running", False):
+        claimed = self._claimed_label(step, value)
+
+        # Rich live-eyes glance only when the loop is already running (no JPEG dump).
+        if live_eyes_enabled():
+            eyes = getattr(ctrl, "_eyes", None)
+            if eyes is not None and getattr(eyes, "_running", False):
+                try:
+                    if hasattr(ctrl, "glance"):
+                        seen = ctrl.glance(force_ocr=False)
+                    elif hasattr(ctrl, "eyes_read"):
+                        seen = ctrl.eyes_read(force_ocr=False)
+                    else:
+                        seen = None
+                    if isinstance(seen, dict) and seen.get("ok"):
+                        seen = self._strip_seen_blobs(dict(seen))
+                        if claimed:
+                            labels = [str(x).lower() for x in (seen.get("labels") or [])]
+                            needle = claimed.lower()
+                            seen["label"] = claimed[:80]
+                            seen["match"] = any(
+                                needle == lab or needle in lab or (lab and lab in needle)
+                                for lab in labels
+                            )
+                        value = dict(value)
+                        value["seen"] = seen
+                        return value
+                except Exception:
+                    pass
+
+        # Light default for click/type: title + claimed-label match. No JPEG.
+        if op not in self._LIGHT_SEEN_AFTER:
             return value
         try:
-            if hasattr(ctrl, "glance"):
-                seen = ctrl.glance(force_ocr=False)
-            elif hasattr(ctrl, "eyes_read"):
-                seen = ctrl.eyes_read(force_ocr=False)
+            if hasattr(ctrl, "hands_glance"):
+                seen = ctrl.hands_glance(claimed=claimed)
+            elif hasattr(ctrl, "read_ui"):
+                ui = ctrl.read_ui()
+                title = str((ui or {}).get("title") or "") if isinstance(ui, dict) else ""
+                labels = [str(x) for x in ((ui or {}).get("labels") or []) if x][:8] if isinstance(ui, dict) else []
+                match = None
+                if claimed and hasattr(ctrl, "_claimed_still_visible"):
+                    match = ctrl._claimed_still_visible(claimed, title, labels, ui if isinstance(ui, dict) else None)
+                elif claimed:
+                    needle = claimed.lower()
+                    match = needle in title.lower() or any(needle in str(x).lower() for x in labels)
+                seen = {"ok": True, "title": title, "match": match, "label": claimed}
+                if labels:
+                    seen["labels"] = labels
             else:
                 return value
-            if isinstance(seen, dict) and seen.get("ok"):
+            if isinstance(seen, dict) and seen.get("ok") is not False:
                 value = dict(value)
-                value["seen"] = seen
+                value["seen"] = self._strip_seen_blobs(seen)
         except Exception:
             return value
         return value
@@ -1138,14 +1323,18 @@ class ExoExecEngine:
     def _observe_budget(self, step: Dict[str, Any]) -> Dict[str, Any]:
         import statistics
         n = max(1, min(500, int(step.get("n", 50))))
-        include_ocr = bool(step.get("include_ocr", False))
+        include_ocr = bool(step["include_ocr"]) if "include_ocr" in step else True
         times_ms: List[float] = []
         chars: List[int] = []
         ctrl = self.ctrl
         last = None
         for _ in range(n):
             t0 = time.perf_counter()
-            obs = ctrl.compact_observe(include_ocr=include_ocr)
+            obs = (
+                ctrl.compact_observe(include_ocr=include_ocr)
+                if "include_ocr" in step
+                else ctrl.compact_observe()
+            )
             packed = compact_payload(obs, verbose=False)
             elapsed = (time.perf_counter() - t0) * 1000.0
             times_ms.append(elapsed)
@@ -1178,6 +1367,59 @@ class ExoExecEngine:
             "last": last,
         }
 
+
+    def _session_memory(self, op: str, step: Dict[str, Any]) -> Dict[str, Any]:
+        from exo_control import session as exo_session
+
+        agent = str(step.get("agent_id") or step.get("agent") or self._session_agent_id or "")
+        if op == "session_start":
+            if agent:
+                self._session_agent_id = agent
+            return exo_session.start(agent or "default", task=str(step.get("task") or ""))
+        if op == "session_end":
+            return exo_session.end(agent or "default")
+        if op == "session_status":
+            return exo_session.status(agent or "default")
+        if op == "remember":
+            return exo_session.remember(agent or "default", str(step.get("key") or ""), step.get("value"))
+        if op in {"recall", "session_recall"}:
+            return exo_session.recall(agent or "default", step.get("key"))
+        if op == "note":
+            return exo_session.note(agent or "default", str(step.get("text") or step.get("note") or ""))
+        if op == "plan":
+            return exo_session.set_plan(
+                agent or "default",
+                str(step.get("goal") or step.get("plan") or ""),
+                steps=step.get("steps") or step.get("actions"),
+            )
+        if op == "checkpoint":
+            return exo_session.checkpoint(
+                agent or "default",
+                focus=step.get("focus"),
+                url=step.get("url"),
+                space_id=step.get("space_id"),
+                path=step.get("path"),
+                note_text=step.get("note") or step.get("text"),
+            )
+        if not agent:
+            return {"ok": False, "error": "recover needs agent_id (or an active session)"}
+        cp = exo_session.get_checkpoint(agent) or {}
+        focus = (cp.get("focus") if isinstance(cp, dict) else None) or exo_session.last_focus(agent)
+        if not focus:
+            return {"ok": False, "error": "no checkpoint or last focus to restore", "session": exo_session.status(agent).get("session")}
+        focused = self._smart_focus(
+            self.ctrl,
+            title=focus.get("title"),
+            pid=focus.get("pid"),
+            monitor=focus.get("monitor"),
+        )
+        exo_session.bump_stat(agent, "recovers")
+        return {
+            "ok": bool(isinstance(focused, dict) and focused.get("ok")),
+            "restored": focused,
+            "checkpoint": cp or None,
+        }
+
     def _dispatch_step(self, op: str, step: Dict[str, Any]) -> Any:
         ctrl = self.ctrl
         if op in {"cursor_exec", "cursor_run"}:
@@ -1188,9 +1430,21 @@ class ExoExecEngine:
             return ctrl.create_cursor(str(step.get("cursor_id") or step.get("id") or step.get("cursor") or "main"))
         if op in {"list_cursors", "cursors"}:
             return {"ok": True, "cursors": ctrl.list_cursors()}
+        if op in {
+            "session_start", "session_memory_end", "session_memory_status",
+            "remember", "session_recall", "note", "plan", "session_checkpoint",
+        }:
+            mapped = {
+                "session_memory_end": "session_end",
+                "session_memory_status": "session_status",
+                "session_checkpoint": "checkpoint",
+            }.get(op, op)
+            return self._session_memory(mapped, step)
         if op in {"goal", "intent"}:
             return self._pilot.set_goal(step)
         if op == "checkpoint":
+            if any(step.get(k) for k in ("agent_id", "agent", "path", "url", "space_id", "focus")):
+                return self._session_memory("checkpoint", step)
             return self._pilot.checkpoint(step)
         if op == "proof":
             return self._pilot.proof(last_error=self._last_error)
@@ -1218,9 +1472,12 @@ class ExoExecEngine:
         if op in {
             "session_open", "seat", "take_seat",
             "session_close", "leave_seat", "session_end",
-            "session_status", "seat_status",
             "pointer", "mouse", "keypress", "drive",
         }:
+            return self._live_seat(op, step)
+        if op in {"session_status", "seat_status"}:
+            if step.get("agent_id") or step.get("agent"):
+                return self._session_memory("session_status", step)
             return self._live_seat(op, step)
         if op == "status":
             st = ctrl.status() if hasattr(ctrl, "status") else {"ok": True}
@@ -1286,6 +1543,14 @@ class ExoExecEngine:
                 )
             if isinstance(focused, dict) and focused.get("ok"):
                 self._hint_eyes_focus(focused)
+                agent = self._session_agent_id
+                if agent:
+                    try:
+                        from exo_control import session as exo_session
+
+                        exo_session.push_focus(agent, focused)
+                    except Exception:
+                        pass
             return focused
         if op in {"read", "read_ui"}:
             return ctrl.read_ui(
@@ -1295,24 +1560,74 @@ class ExoExecEngine:
             )
         if op in {"observe", "compact_observe"}:
             mon = step.get("monitor")
-            kwargs = {"include_ocr": bool(step.get("include_ocr", False))}
+            kwargs: Dict[str, Any] = {}
+            if "include_ocr" in step:
+                kwargs["include_ocr"] = bool(step.get("include_ocr"))
             if mon is not None:
                 kwargs["monitor"] = int(mon)
             return ctrl.compact_observe(**kwargs)
-        if op in {"click", "smart_click"}:
+        if op in {"click", "smart_click", "right_click", "context_click", "double_click"}:
+            button = str(step.get("button") or "left")
+            clicks = int(step.get("clicks") or 1)
+            if op in {"right_click", "context_click"}:
+                button = "right"
+            if op == "double_click" or step.get("double"):
+                clicks = max(clicks, 2)
+            click_kwargs = {
+                "button": button,
+                "clicks": clicks,
+                "require_change": bool(step.get("require_change", False)),
+            }
+            def _click(**extra):
+                merged = {**extra, **click_kwargs}
+                try:
+                    return ctrl.smart_click(**merged)
+                except TypeError:
+                    for drop in ("bbox", "source", "kind", "clicks"):
+                        merged.pop(drop, None)
+                    try:
+                        return ctrl.smart_click(**merged)
+                    except TypeError:
+                        return ctrl.smart_click(
+                            query=extra.get("query"),
+                            x=extra.get("x"),
+                            y=extra.get("y"),
+                            element_index=extra.get("element_index"),
+                            pid=extra.get("pid"),
+                            window_id=extra.get("window_id"),
+                            label=extra.get("label"),
+                            button=click_kwargs["button"],
+                            require_change=click_kwargs["require_change"],
+                        )
+
             ref_hit = self._resolve_ref(step)
-            if ref_hit is not None:
-                return _action_result(
-                    ctrl.smart_click(
-                        query=step.get("query") or ref_hit.get("name"),
-                        element_index=ref_hit.get("element_index"),
-                        pid=ref_hit.get("pid"),
-                        window_id=ref_hit.get("window_id"),
-                        label=ref_hit.get("name"),
-                        button=step.get("button", "left"),
-                        require_change=bool(step.get("require_change", False)),
+            if ref_hit is None and (step.get("query") or step.get("label") or step.get("kind")):
+                try:
+                    from exo_control import session as exo_session
+                    cached = exo_session.lookup_hit(
+                        label=step.get("query") or step.get("label"),
+                        kind=step.get("kind") or step.get("role"),
                     )
-                )
+                    if cached:
+                        ref_hit = self._hit_to_desktop_ref(cached)
+                except Exception:
+                    ref_hit = None
+            if ref_hit is not None:
+                src = str(ref_hit.get("source") or "").lower()
+                if src == "a11y":
+                    src = "uia"
+                extra = {
+                    "query": step.get("query") or ref_hit.get("name"),
+                    "pid": ref_hit.get("pid"),
+                    "window_id": ref_hit.get("window_id"),
+                    "label": ref_hit.get("name"),
+                    "bbox": ref_hit.get("bbox"),
+                    "source": src or None,
+                    "kind": ref_hit.get("kind"),
+                }
+                if src in {"", "uia"} and ref_hit.get("element_index") is not None:
+                    extra["element_index"] = ref_hit.get("element_index")
+                return _action_result(_click(**{k: v for k, v in extra.items() if v is not None}))
             if step.get("ref") is not None:
                 return {
                     "ok": False,
@@ -1320,12 +1635,10 @@ class ExoExecEngine:
                     "known_refs": list(self._desktop_refs.keys())[:40],
                 }
             return _action_result(
-                ctrl.smart_click(
+                _click(
                     query=step.get("query"),
                     x=step.get("x"),
                     y=step.get("y"),
-                    button=step.get("button", "left"),
-                    require_change=bool(step.get("require_change", False)),
                     element_index=step.get("element_index"),
                     pid=step.get("pid"),
                     window_id=step.get("window_id") or step.get("hwnd"),
@@ -1404,6 +1717,42 @@ class ExoExecEngine:
             )
         if op in {"hotkey", "smart_hotkey"}:
             return _action_result(ctrl.smart_hotkey(step.get("keys") or []))
+        if op in {"copy", "paste", "select_all"}:
+            chord = {"copy": ["ctrl", "c"], "paste": ["ctrl", "v"], "select_all": ["ctrl", "a"]}[op]
+            return _action_result(ctrl.smart_hotkey(step.get("keys") or chord))
+        if op in {"menu", "context_menu"}:
+            target = str(step.get("query") or step.get("on") or "")
+            item = str(step.get("item") or step.get("choice") or step.get("text") or "")
+            if not target:
+                return {"ok": False, "error": "menu requires query"}
+            first = _action_result(
+                ctrl.smart_click(query=target, button="right", clicks=1)
+            )
+            if not _step_ok(first):
+                return first
+            time.sleep(0.28)
+            if not item:
+                return {**first, "opened": True}
+            second = _action_result(ctrl.smart_click(query=item, button="left"))
+            return {**second, "menu": target, "item": item}
+        if op in {"find", "locate"}:
+            from exo_control.pc import match_elements
+
+            query = str(step.get("query") or step.get("text") or step.get("q") or "")
+            if not self._desktop_refs:
+                try:
+                    observed = ctrl.read_ui(
+                        force=True,
+                        interactive_only=bool(step.get("interactive", False)),
+                        max_elements=int(step.get("max_elements", 120)),
+                    )
+                    observed = _normalize_result("read", observed)
+                    if _step_ok(observed):
+                        self._register_desktop_refs(observed)
+                except Exception:
+                    pass
+            elements = list(self._desktop_refs.values())
+            return match_elements(elements, query, max_items=int(step.get("max", 20)))
         if op == "fill":
             fields = step.get("fields") or {}
             if not fields and step.get("query") is not None and step.get("text") is not None:
@@ -1494,6 +1843,10 @@ class ExoExecEngine:
             from exo_control import ego_ops
             return ego_ops.detect()
 
+        if op in {"recall", "session_recall"} and (
+            step.get("key") is not None or step.get("agent_id") or step.get("agent")
+        ) and not step.get("query") and not step.get("app"):
+            return self._session_memory("recall", step)
         from exo_control import addon_ops
         addon = addon_ops.dispatch(op, step)
         if addon is not None:
@@ -1592,7 +1945,7 @@ class ExoExecEngine:
         if op == "browser_eval":
             if deny_browser_eval():
                 return {"ok": False, "error": "browser_eval denied by EXO_DENY_BROWSER_EVAL=1"}
-            if not parse_confirm(step.get("confirm")):
+            if not confirm_ok(step.get("confirm"), kind="browser_eval"):
                 return {"ok": False, "error": "browser_eval requires confirm=true"}
             return browser.evaluate(str(step.get("js", "")), step.get("space_id"))
         if op == "browser_close_space":
@@ -1682,6 +2035,35 @@ class ExoExecEngine:
                 width=step.get("width") or step.get("w"),
                 height=step.get("height") or step.get("h"),
                 space_id=step.get("space_id"),
+            )
+        if op == "browser_read":
+            if hasattr(browser, "extract"):
+                return browser.extract(
+                    step.get("space_id"),
+                    max_chars=int(step.get("max_chars", step.get("max", 4000))),
+                )
+            return {"ok": False, "error": "browser_read not available"}
+        if op in {"web_task", "web_act"}:
+            from exo_control.web import web_task as _web_task
+            try:
+                engine = browser if browser is not None else self._get_browser()
+            except Exception as exc:
+                engine = None
+                mode = str(step.get("mode") or "auto").lower().replace("-", "_")
+                if mode not in {"browser_use", "browseruse", "use"}:
+                    return {
+                        "ok": False,
+                        "error": f"browser engine unavailable: {exc}",
+                        "hint": 'pip install "exo-control[browser]" && playwright install chromium',
+                    }
+            return _web_task(
+                goal=str(step.get("goal") or step.get("task") or step.get("query") or ""),
+                actions=step.get("actions") or step.get("steps"),
+                url=step.get("url"),
+                mode=str(step.get("mode") or "auto"),
+                browser=engine,
+                space_id=step.get("space_id"),
+                max_actions=int(step.get("max_actions", step.get("max_steps", 20))),
             )
 
         if op in {"screenshot", "shot"}:
@@ -1778,7 +2160,7 @@ class ExoExecEngine:
             if not resolved.get("ok"):
                 return resolved
             command = resolved["command"]
-            if is_dangerous_launch(str(command)) and not parse_confirm(step.get("confirm")):
+            if is_dangerous_launch(str(command)) and not confirm_ok(step.get("confirm"), kind="launch"):
                 return {
                     "ok": False,
                     "error": "launch of shell/script host requires confirm=true",
@@ -1791,7 +2173,7 @@ class ExoExecEngine:
             env = os.environ.copy()
             extra = step.get("env") or {}
             if isinstance(extra, dict) and extra:
-                if not parse_confirm(step.get("confirm")):
+                if not confirm_ok(step.get("confirm"), kind="launch"):
                     return {"ok": False, "error": "launch env= override requires confirm=true"}
                 env.update({str(k): str(v) for k, v in extra.items()})
             cdp_port = step.get("cdp_port") or step.get("port")
@@ -1911,7 +2293,7 @@ class ExoExecEngine:
             target = step.get("path") or step.get("url") or step.get("target")
             if not target:
                 return {"ok": False, "error": "open requires path/url/target"}
-            if open_needs_confirm(str(target)) and not parse_confirm(step.get("confirm")):
+            if open_needs_confirm(str(target)) and not confirm_ok(step.get("confirm"), kind="open"):
                 return {
                     "ok": False,
                     "error": "open of script/binary requires confirm=true",
@@ -1945,6 +2327,31 @@ class ExoExecEngine:
                 return ctrl.window_max(hwnd_i)
             if op == "window_restore":
                 return ctrl.window_restore(hwnd_i)
+            if op == "window_move":
+                if hasattr(ctrl, "window_move"):
+                    return ctrl.window_move(
+                        hwnd_i,
+                        x=step.get("x"),
+                        y=step.get("y"),
+                        width=step.get("width") or step.get("w"),
+                        height=step.get("height") or step.get("h"),
+                    )
+                return {"ok": False, "error": "window_move not available"}
+            if op == "window_resize":
+                if hasattr(ctrl, "window_resize"):
+                    return ctrl.window_resize(
+                        hwnd_i,
+                        width=step.get("width") or step.get("w"),
+                        height=step.get("height") or step.get("h"),
+                    )
+                return {"ok": False, "error": "window_resize not available"}
+            if op == "window_snap":
+                if hasattr(ctrl, "window_snap"):
+                    return ctrl.window_snap(
+                        hwnd_i,
+                        side=str(step.get("side") or step.get("to") or "left"),
+                    )
+                return {"ok": False, "error": "window_snap not available"}
             if op == "window_close":
                 return ctrl.window_close(
                     hwnd_i,
@@ -1969,6 +2376,21 @@ class ExoExecEngine:
                 return ctrl.window_max(hwnd_i)
             if action in {"restore", "show"}:
                 return ctrl.window_restore(hwnd_i)
+            if action in {"move"}:
+                return ctrl.window_move(
+                    hwnd_i,
+                    x=step.get("x"), y=step.get("y"),
+                    width=step.get("width") or step.get("w"),
+                    height=step.get("height") or step.get("h"),
+                )
+            if action in {"resize"}:
+                return ctrl.window_resize(
+                    hwnd_i,
+                    width=step.get("width") or step.get("w"),
+                    height=step.get("height") or step.get("h"),
+                )
+            if action in {"snap"}:
+                return ctrl.window_snap(hwnd_i, side=str(step.get("side") or "left"))
             if action in {"close", "quit"}:
                 return ctrl.window_close(hwnd_i)
             if action in {"state", "status"}:
@@ -1990,14 +2412,33 @@ class ExoExecEngine:
 
 
         if op == "lease_acquire":
+            from exo_control.trust import default_lease_ttl_sec
+
+            agent_id = str(step.get("agent") or step.get("agent_id") or "")
+            task = str(step.get("task") or "")
+            ttl = step.get("ttl_sec", step.get("ttl"))
+            if ttl is None:
+                ttl = default_lease_ttl_sec()
             out = desktop_lease.acquire(
-                agent_id=str(step.get("agent") or step.get("agent_id") or ""),
-                task=str(step.get("task") or ""),
-                ttl_sec=float(step.get("ttl_sec", step.get("ttl", 120))),
+                agent_id=agent_id,
+                task=task,
+                ttl_sec=float(ttl),
             )
             if out.get("ok") and out.get("token"):
                 self._script_lease_token = str(out["token"])
+                self._session_agent_id = agent_id or self._session_agent_id
+                if self._session_agent_id:
+                    try:
+                        from exo_control import session as exo_session
+
+                        sess = exo_session.start(self._session_agent_id, task=task)
+                        out["session"] = sess.get("session")
+                    except Exception:
+                        pass
                 self._maybe_start_live_eyes(step, out)
+                from exo_control.trust import snapshot_for_identity
+
+                out["trust"] = snapshot_for_identity()
             return out
         if op == "lease_renew":
             token = self._lease_token(step) or str(step.get("token") or "")
@@ -2010,6 +2451,8 @@ class ExoExecEngine:
             return out
         if op == "lease_release":
             token = self._lease_token(step) or str(step.get("token") or "")
+            if not token:
+                return {"ok": True, "released": False, "reason": "no lease held by this engine"}
             out = desktop_lease.release(token=token)
             if out.get("ok") and out.get("released"):
                 if self._script_lease_token == token:
@@ -2040,7 +2483,11 @@ class ExoExecEngine:
             return {"ok": False, "error": "eyes_read not available"}
 
         if op == "eyes":
-            observe = ctrl.compact_observe(include_ocr=bool(step.get("include_ocr", False)))
+            observe = (
+                ctrl.compact_observe(include_ocr=bool(step.get("include_ocr")))
+                if "include_ocr" in step
+                else ctrl.compact_observe()
+            )
             from exo_control import exo_bridge
             endpoints = sanitize_cdp_endpoints(
                 exo_bridge.discover_cdp_endpoints(
@@ -2074,7 +2521,7 @@ class ExoExecEngine:
                     out = {**out, "action": "list"}
                 return out
             if action in {"kill", "stop", "terminate"}:
-                if not parse_confirm(step.get("confirm")):
+                if not confirm_ok(step.get("confirm"), kind="proc_kill"):
                     return {"ok": False, "error": "proc kill requires confirm=true"}
                 pid = step.get("pid")
                 name = step.get("name") or step.get("process") or step.get("exe")
@@ -2138,11 +2585,16 @@ class ExoExecEngine:
                 value_type=str(step.get("type") or step.get("value_type") or "string"),
                 confirm=parse_confirm(step.get("confirm", False)),
             )
+        if op == "registry_delete":
+            return registry_ops.registry_delete(
+                path=str(step.get("path") or step.get("key") or ""),
+                name=step.get("name") if step.get("name") is not None else step.get("value_name"),
+                recursive=bool(step.get("recursive", False)),
+                confirm=parse_confirm(step.get("confirm", False)),
+            )
         if op == "proc_list":
             return infra_ops.proc_list(max_items=int(step.get("max", 120)))
         if op == "proc_kill":
-            if not parse_confirm(step.get("confirm")):
-                return {"ok": False, "error": "proc kill requires confirm=true"}
             pid = step.get("pid")
             name = step.get("name") or step.get("process") or step.get("exe")
             if pid is None and not name:
@@ -2150,7 +2602,7 @@ class ExoExecEngine:
             return infra_ops.kill_proc(
                 int(pid) if pid is not None else None,
                 name=str(name) if name else None,
-                confirm=True,
+                confirm=parse_confirm(step.get("confirm")),
             )
         if op == "service_list":
             return infra_ops.service_list(max_items=int(step.get("max", 80)))
@@ -2219,6 +2671,8 @@ class ExoExecEngine:
             return out
 
         if op in {"kill_switch", "arm_kill_switch", "disarm_kill_switch"}:
+            from exo_control.trust import human_kill_armed, kill_file_present
+
             safety = self._ensure_safety()
             if op == "arm_kill_switch":
                 armed = True
@@ -2231,6 +2685,15 @@ class ExoExecEngine:
                     armed = bool(step.get("enable"))
                 else:
                     armed = True
+            if not armed and human_kill_armed():
+                kill = kill_file_present()
+                return {
+                    "ok": False,
+                    "error": "human kill-switch is armed; operator must delete ~/.exo/KILL (or unset EXO_KILL_SWITCH)",
+                    "kill_switch": True,
+                    "path": str(kill) if kill else None,
+                    "armed": True,
+                }
             if armed:
                 safety.arm_kill_switch()
             else:
@@ -2252,7 +2715,154 @@ class ExoExecEngine:
         if op in {"search_content", "search_snippets", "pplx_content"}:
             from exo_control import search_ops
             return search_ops.search_content(step)
+        if op in {"trust_status", "trust"}:
+            from exo_control.trust import status as trust_status
 
+            return trust_status()
+        if op == "trust_enable":
+            from exo_control.trust import enable_full_trust
+
+            return enable_full_trust(
+                ack=str(step.get("ack") or step.get("phrase") or ""),
+                confirm=parse_confirm(step.get("confirm")),
+                source="op",
+            )
+        if op in {"elevate_status", "elevate_install", "elevate"}:
+            from exo_control.elevate import ensure_broker, status as elevate_status
+
+            action = str(step.get("action") or ("install" if op == "elevate_install" else "status")).lower()
+            if action in {"install", "start", "ensure"}:
+                return ensure_broker(uac=True)
+            return elevate_status()
+        if op in {"run_elevated", "elevate_run"}:
+            from exo_control.elevate import call as elevate_call, should_escalate, is_admin, in_broker, _run_cmd
+
+            argv = step.get("argv")
+            if argv is None:
+                argv = step.get("cmd") or step.get("command")
+            if is_admin() or in_broker():
+                return _run_cmd(argv, timeout=float(step.get("timeout") or 60))
+            if not should_escalate():
+                return {"ok": False, "error": "run_elevated requires Full-Trust owner mode"}
+            return elevate_call(
+                "run_cmd",
+                {"argv": argv, "timeout": float(step.get("timeout") or 60)},
+                timeout=float(step.get("timeout") or 60) + 15,
+            )
+        if op == "os_info":
+            from exo_control.os_ops import os_info
+
+            return os_info()
+        if op == "drives":
+            from exo_control.os_ops import drives
+
+            return drives(max_items=int(step.get("max", 16)))
+        if op == "which":
+            from exo_control.os_ops import which
+
+            return which(str(step.get("name") or step.get("cmd") or step.get("app") or ""))
+        if op == "proc_info":
+            from exo_control.os_ops import proc_info
+
+            pid = step.get("pid")
+            return proc_info(
+                pid=int(pid) if pid is not None else None,
+                name=step.get("name") or step.get("process"),
+            )
+        if op in {"files_exists", "files_stat", "files_mkdir", "files_search", "files_glob"}:
+            from exo_control import os_ops
+
+            confirm = parse_confirm(step.get("confirm", False))
+            path = str(step.get("path") or ".")
+            if op == "files_exists":
+                return os_ops.files_exists(path, confirm=confirm)
+            if op == "files_stat":
+                return os_ops.files_stat(path, confirm=confirm)
+            if op == "files_mkdir":
+                return os_ops.files_mkdir(path, confirm=confirm)
+            return os_ops.files_search(
+                path,
+                pattern=str(step.get("pattern") or step.get("glob") or "*"),
+                max_items=int(step.get("max", 80)),
+                confirm=confirm,
+            )
+        if op in {"session_start", "session_end", "session_status", "remember", "recall",
+                  "session_recall", "note", "plan", "checkpoint", "recover", "focus_restore"}:
+            from exo_control import session as exo_session
+
+            agent = str(
+                step.get("agent_id") or step.get("agent") or self._session_agent_id or ""
+            )
+            if op == "session_start":
+                if agent:
+                    self._session_agent_id = agent
+                return exo_session.start(agent or "default", task=str(step.get("task") or ""))
+            if op == "session_end":
+                return exo_session.end(agent or "default")
+            if op == "session_status":
+                return exo_session.status(agent or "default")
+            if op in {"remember"}:
+                return exo_session.remember(agent or "default", str(step.get("key") or ""), step.get("value"))
+            if op in {"recall", "session_recall"}:
+                return exo_session.recall(agent or "default", step.get("key"))
+            if op == "note":
+                return exo_session.note(agent or "default", str(step.get("text") or step.get("note") or ""))
+            if op == "plan":
+                return exo_session.set_plan(
+                    agent or "default",
+                    str(step.get("goal") or step.get("plan") or ""),
+                    steps=step.get("steps") or step.get("actions"),
+                )
+            if op == "checkpoint":
+                return exo_session.checkpoint(
+                    agent or "default",
+                    focus=step.get("focus"),
+                    url=step.get("url"),
+                    space_id=step.get("space_id"),
+                    path=step.get("path"),
+                    note_text=step.get("note") or step.get("text"),
+                )
+            # recover / focus_restore
+            if not agent:
+                return {"ok": False, "error": "recover needs agent_id (or an active session)"}
+            cp = exo_session.get_checkpoint(agent) or {}
+            focus = (cp.get("focus") if isinstance(cp, dict) else None) or exo_session.last_focus(agent)
+            if not focus:
+                return {"ok": False, "error": "no checkpoint or last focus to restore", "session": exo_session.status(agent).get("session")}
+            focused = self._smart_focus(
+                ctrl,
+                title=focus.get("title"),
+                pid=focus.get("pid"),
+                monitor=focus.get("monitor"),
+            )
+            exo_session.bump_stat(agent, "recovers")
+            return {
+                "ok": bool(isinstance(focused, dict) and focused.get("ok")),
+                "restored": focused,
+                "checkpoint": cp or None,
+            }
+
+        if op in {
+            "pc", "pc_status", "audio", "volume", "mute", "brightness", "power", "battery",
+            "lock", "sleep", "idle", "clock", "network", "wifi", "wifi_connect",
+            "settings_open", "ms_settings", "wallpaper", "recycle", "recycle_empty",
+            "package", "winget", "files_hash", "files_zip", "files_unzip",
+            "files_touch", "files_reveal", "watch_file", "watch_proc",
+        }:
+            from exo_control import pc as exo_pc
+
+            action = op
+            if op in {"pc", "pc_status"}:
+                action = str(step.get("action") or "status")
+            elif op in {"volume"}:
+                action = "audio"
+            elif op in {"battery"}:
+                action = "power"
+            elif op in {"ms_settings"}:
+                action = "settings_open"
+            elif op == "winget":
+                action = "package"
+            return exo_pc.dispatch(action, step)
         return {"ok": False, "error": f"Unknown operation: {op or '<empty>'}"}
 
 
@@ -2573,7 +3183,7 @@ def _list_procs(max_items: int = 120) -> Dict[str, Any]:
 
 
 def _kill_proc(pid: Optional[int] = None, name: Optional[str] = None) -> Dict[str, Any]:
-    """Kill helper used by proc action=kill; hard-denies protected anti-cheat names."""
+    """Kill helper used by proc action=kill. Default denies anti-cheat; Full-Trust does not."""
     return infra_ops.kill_proc(
         int(pid) if pid is not None else None,
         name=name,

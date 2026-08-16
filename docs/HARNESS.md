@@ -131,8 +131,10 @@ Or MCP: `exo_help` with optional `query`.
 ## Safety (same for every model)
 
 - One **desktop lease** at a time
-- Destructive / kill / registry write / service control need `confirm=true`
-- Hard deny: anti-cheat, credential dump, silent elevation
+- Destructive / kill / registry write / service control need `confirm=true` unless Full-Trust is on
+- Default/trusted hard deny: anti-cheat, unnamed PID, critical services, HKLM, System32 writes, non-loopback CDP
+- Full-Trust owner mode lifts those denials and auto-elevates privileged ops (MCP stays medium IL)
+- Human kill-switch: `~/.exo/KILL` or `exo-control trust kill`
 - Details: [SECURITY.md](../SECURITY.md)
 
 ## Install once
@@ -145,6 +147,17 @@ pip install "git+https://github.com/ImAvgErix/ExoControl.git@v2.2.0"
 # optional CDP:
 pip install "exo-control[browser]"
 playwright install chromium
+# optional Browser Use web expert:
+pip install "exo-control[web]"
+```
+
+Full-Trust (optional, operator-only):
+
+```bash
+exo-control trust enable --ack "I own this PC"
+# then set EXO_TRUST=full on the MCP server env and restart it
+exo-control trust status
+exo-control elevate install   # one UAC; optional — first admin op also does this
 ```
 
 Do **not** set `PYTHONPATH` to `~\.aether\aether-driver` or `Documents\exo-control` — those shadow the installed package.

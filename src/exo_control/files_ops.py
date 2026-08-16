@@ -11,7 +11,17 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 def default_roots() -> List[Path]:
     from exo_control.paths import file_roots
-    return file_roots()
+    from exo_control.trust import extra_file_roots
+
+    roots = list(file_roots())
+    seen = {str(r).lower() for r in roots}
+    for extra in extra_file_roots():
+        key = str(extra).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(extra)
+    return roots
 
 
 def _audit_path() -> Path:
@@ -60,10 +70,24 @@ def _resolve_under_roots(
 
 
 def _outside_denied(op: str, path: str, confirm: bool) -> Optional[Dict[str, Any]]:
-    """Outside-root access needs operator EXO_ALLOW_OUTSIDE_ROOTS=1 *and* confirm."""
-    from exo_control.policy import allow_outside_roots, parse_confirm
+    """Outside-root access needs operator EXO_ALLOW_OUTSIDE_ROOTS=1 *and* confirm.
 
-    if allow_outside_roots() and parse_confirm(confirm):
+    Full-Trust / elevated broker unlock the disk (except the kill-switch file).
+    Default/trusted still need the operator flag.
+    """
+    from exo_control.policy import allow_outside_roots, confirm_ok
+    from exo_control.trust import is_protected_system_path
+
+    if is_protected_system_path(path) and op not in {"files_list", "files_read", "files_exists", "files_stat", "files_search"}:
+        audit_append({"op": op, "path": path, "denied": "system_path"})
+        return {
+            "ok": False,
+            "error": "protected_system_path",
+            "path": path,
+            "denied": True,
+            "outside": True,
+        }
+    if allow_outside_roots() and confirm_ok(confirm, kind="files_outside"):
         return None
     audit_append({
         "op": op,
@@ -184,6 +208,11 @@ def files_write(
         if denied is not None:
             return denied
     p = Path(resolved_or_err)
+    from exo_control.trust import is_protected_system_path
+
+    if is_protected_system_path(p):
+        audit_append({"op": "files_write", "path": str(p), "denied": "system_path"})
+        return {"ok": False, "error": "protected_system_path", "path": str(p), "denied": True}
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(str(text), encoding="utf-8")
@@ -191,7 +220,13 @@ def files_write(
             audit_append({"op": "files_write", "path": str(p), "confirm": True, "outside": True})
         return {"ok": True, "path": str(p), "bytes": len(str(text).encode("utf-8")), "outside": outside}
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        from exo_control.elevate import retry_if_needed
+
+        return retry_if_needed(
+            "files_write",
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}", "path": str(p)},
+            {"path": str(p), "text": str(text)},
+        )
 
 
 def files_copy(
@@ -222,13 +257,24 @@ def files_copy(
             denied["dst"] = dst_r
             return denied
     try:
+        from exo_control.trust import is_protected_system_path
+
+        if is_protected_system_path(dst_r):
+            audit_append({"op": "files_copy", "dst": dst_r, "denied": "system_path"})
+            return {"ok": False, "error": "protected_system_path", "dst": dst_r, "denied": True}
         Path(dst_r).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_r, dst_r)
         if out_s or out_d:
             audit_append({"op": "files_copy", "src": src_r, "dst": dst_r, "confirm": True, "outside": True})
         return {"ok": True, "src": src_r, "dst": dst_r}
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        from exo_control.elevate import retry_if_needed
+
+        return retry_if_needed(
+            "files_copy",
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}", "src": src_r, "dst": dst_r},
+            {"src": src_r, "dst": dst_r},
+        )
 
 
 def files_move(
@@ -259,12 +305,23 @@ def files_move(
             denied["dst"] = dst_r
             return denied
     try:
+        from exo_control.trust import is_protected_system_path
+
+        if is_protected_system_path(dst_r):
+            audit_append({"op": "files_move", "dst": dst_r, "denied": "system_path"})
+            return {"ok": False, "error": "protected_system_path", "dst": dst_r, "denied": True}
         Path(dst_r).parent.mkdir(parents=True, exist_ok=True)
         shutil.move(src_r, dst_r)
         audit_append({"op": "files_move", "src": src_r, "dst": dst_r, "confirm": bool(confirm), "outside": out_s or out_d})
         return {"ok": True, "src": src_r, "dst": dst_r}
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        from exo_control.elevate import retry_if_needed
+
+        return retry_if_needed(
+            "files_move",
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}", "src": src_r, "dst": dst_r},
+            {"src": src_r, "dst": dst_r},
+        )
 
 
 def files_delete(
@@ -282,6 +339,11 @@ def files_delete(
         if denied is not None:
             return denied
     p = Path(resolved_or_err)
+    from exo_control.trust import is_protected_system_path
+
+    if is_protected_system_path(p):
+        audit_append({"op": "files_delete", "path": str(p), "denied": "system_path"})
+        return {"ok": False, "error": "protected_system_path", "path": str(p), "denied": True}
     if not p.exists():
         return {"ok": False, "error": f"path not found: {p}"}
     try:
@@ -293,7 +355,9 @@ def files_delete(
             except StopIteration:
                 non_empty = False
             if non_empty or recursive:
-                if not confirm:
+                from exo_control.policy import confirm_ok
+
+                if not confirm_ok(confirm, kind="files_delete"):
                     audit_append({
                         "op": "files_delete",
                         "path": str(p),
@@ -317,4 +381,10 @@ def files_delete(
         audit_append({"op": "files_delete", "path": str(p), "confirm": bool(confirm), "outside": outside})
         return {"ok": True, "path": str(p), "deleted": "file"}
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        from exo_control.elevate import retry_if_needed
+
+        return retry_if_needed(
+            "files_delete",
+            {"ok": False, "error": f"{type(exc).__name__}: {exc}", "path": str(p)},
+            {"path": str(p), "recursive": bool(recursive)},
+        )

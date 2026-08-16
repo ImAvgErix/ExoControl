@@ -286,3 +286,162 @@ class LocalGrounder:
             # OCR-only
             return self.ground(None, ocr_items=ocr)
         return self.ground(image, ocr_items=ocr)
+
+
+def _iou(a, b) -> float:
+    if not a or not b or len(a) != 4 or len(b) != 4:
+        return 0.0
+    ax1, ay1, ax2, ay2 = [int(x) for x in a]
+    bx1, by1, bx2, by2 = [int(x) for x in b]
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(1, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(1, (bx2 - bx1) * (by2 - by1))
+    return inter / float(area_a + area_b - inter)
+
+
+def _offset_bbox(bbox, origin):
+    if not bbox or len(bbox) != 4 or not origin:
+        return list(bbox) if bbox and len(bbox) == 4 else bbox
+    ox, oy = int(origin[0]), int(origin[1])
+    return [int(bbox[0]) + ox, int(bbox[1]) + oy, int(bbox[2]) + ox, int(bbox[3]) + oy]
+
+
+def _visible_bbox(bbox) -> bool:
+    if not bbox or len(bbox) != 4:
+        return False
+    x1, y1, x2, y2 = bbox
+    return (int(x2) - int(x1)) >= 2 and (int(y2) - int(y1)) >= 2
+
+
+def fuse_observe_hits(
+    a11y_elements: Optional[List[Dict[str, Any]]] = None,
+    grounded: Optional[List[Dict[str, Any]]] = None,
+    ocr_items: Optional[List[Dict[str, Any]]] = None,
+    *,
+    max_hits: int = 40,
+    pid: Any = None,
+    window_id: Any = None,
+    origin: Optional[Tuple[int, int]] = None,
+) -> List[Dict[str, Any]]:
+    """Compact session hits from a11y + OpenCV/OCR. No live desktop required.
+
+    Each hit: ``{ref, label, role, kind, bbox, source, visible}``.
+    ``source`` is one of uia | ocr | opencv | fused.
+    """
+    hits: List[Dict[str, Any]] = []
+    used_ocr = set()
+
+    for e in a11y_elements or []:
+        if not isinstance(e, dict):
+            continue
+        bbox = e.get("bbox") or e.get("bounds")
+        if origin and bbox:
+            bbox = _offset_bbox(bbox, origin)
+        label = (e.get("label") or e.get("name") or e.get("text") or "").strip()
+        role = (e.get("role") or e.get("kind") or "").strip() or None
+        hits.append({
+            "label": label,
+            "role": role,
+            "kind": role or "uia",
+            "bbox": bbox,
+            "source": "uia",
+            "visible": bool(e.get("visible", True)) and (True if not bbox else _visible_bbox(bbox)),
+            "element_index": e.get("element_index", e.get("index")),
+            "confidence": float(e.get("confidence") or e.get("conf") or 0.7),
+        })
+
+    for e in grounded or []:
+        if not isinstance(e, dict):
+            continue
+        bbox = e.get("bbox")
+        if origin and bbox:
+            bbox = _offset_bbox(bbox, origin)
+        src = str(e.get("source") or "opencv").lower()
+        if src not in {"ocr", "opencv", "fused", "omniparser", "uia"}:
+            src = "opencv"
+        label = (e.get("label") or e.get("name") or e.get("text") or "").strip()
+        kind = (e.get("kind") or e.get("role") or src).strip() or src
+        # Drop unlabeled opencv noise that sits on a UIA box.
+        skip = False
+        for existing in hits:
+            if existing.get("source") != "uia":
+                continue
+            if _iou(bbox, existing.get("bbox")) >= 0.45:
+                if not label or label in {"button", "input", "icon", "region", "text"}:
+                    skip = True
+                    break
+                if label and (existing.get("label") or "").lower() == label.lower():
+                    existing["source"] = "fused"
+                    existing["kind"] = kind or existing.get("kind")
+                    skip = True
+                    break
+        if skip:
+            continue
+        hits.append({
+            "label": label,
+            "role": kind,
+            "kind": kind,
+            "bbox": bbox,
+            "source": src if src != "omniparser" else "fused",
+            "visible": _visible_bbox(bbox) if bbox else True,
+            "element_index": e.get("element_index"),
+            "confidence": float(e.get("confidence") or e.get("conf") or 0.45),
+        })
+
+    for i, item in enumerate(ocr_items or []):
+        if not isinstance(item, dict):
+            continue
+        text = (item.get("text") or item.get("label") or "").strip()
+        bbox = item.get("bbox")
+        if origin and bbox:
+            bbox = _offset_bbox(bbox, origin)
+        if not text:
+            continue
+        if any(_iou(bbox, h.get("bbox")) >= 0.3 and (h.get("label") or "").lower() == text.lower() for h in hits):
+            used_ocr.add(i)
+            continue
+        hits.append({
+            "label": text,
+            "role": "text",
+            "kind": "text",
+            "bbox": bbox,
+            "source": "ocr",
+            "visible": _visible_bbox(bbox) if bbox else True,
+            "element_index": None,
+            "confidence": float(item.get("confidence") or item.get("conf") or 0.5),
+        })
+
+    # Prefer named / higher-confidence, keep unlabeled icons (grounded boxes).
+    def _rank(h: Dict[str, Any]) -> tuple:
+        labeled = 1 if (h.get("label") and h["label"] not in {"button", "input", "icon", "region", "text"}) else 0
+        src_w = {"fused": 3, "uia": 2, "ocr": 1, "opencv": 1}.get(h.get("source"), 0)
+        return (labeled, src_w, float(h.get("confidence") or 0))
+
+    hits.sort(key=_rank, reverse=True)
+    out: List[Dict[str, Any]] = []
+    for i, h in enumerate(hits[: max(1, int(max_hits))]):
+        ref = f"e{i}"
+        item = {
+            "ref": ref,
+            "label": h.get("label") or "",
+            "role": h.get("role"),
+            "kind": h.get("kind") or h.get("role") or h.get("source"),
+            "bbox": h.get("bbox"),
+            "source": h.get("source") or "uia",
+            "visible": bool(h.get("visible", True)),
+        }
+        if h.get("element_index") is not None:
+            item["element_index"] = h.get("element_index")
+        if pid is not None:
+            item["pid"] = pid
+        if window_id is not None:
+            item["window_id"] = window_id
+        if h.get("confidence") is not None:
+            item["confidence"] = round(float(h["confidence"]), 3)
+        out.append(item)
+    return out

@@ -3,6 +3,50 @@
 Version history for the **Exo Control** Python package.  
 This is a library (pip / wheel), not a Setup.exe. GitHub Release may include the wheel + sdist.
 
+## 2.5.0
+
+Fused eyes by default.
+
+- **Default observe** runs window-local OpenCV grounding + OCR (when an in-process backend exists) + a11y. Missing OCR is honest (`ocr: "unavailable"`, `ocr_count=0`).
+- **Session hits.** Observe stores fused `{ref,label,kind,bbox,source,visible}` on the session. The next exec can `click` those refs. New observe replaces the cache; `session_close` clears it.
+- **click** matches session hits first (ref/label/kind), then UIA. Coords are last-resort and unverified 0.55 guesses are `ok:false`.
+- **`ocr_win`** is Windows.Media.Ocr via WinRT (in-process `winrt`/`winsdk` or in-box PowerShell). Fail closed (`ok:false`, `UNAVAILABLE`) if the engine is missing. Fused observe prefers winocr, then tesseract, then lazy easyocr.
+- **Glance** after click/type: cheap `seen` (title + whether the claimed label/hit still matches). No JPEG.
+
+## 2.4.0
+
+The rest of the PC. Eyes that find. Hands that right-click for real.
+
+- **`find`.** Search the last `read`/`observe` (or a fresh read) for a query and get refs back. In the compact catalog.
+- **Owner snapshot.** `pc` / `exo-control pc` — audio, power, idle, network, wifi, recycle, clock in one compact payload.
+- **Audio / display / power.** Get/set default playback volume and mute (Core Audio). Laptop brightness via WMI (honest fail on desktop). AC/battery + plan. `lock`. `sleep` (confirm). `idle` ms since last input.
+- **Network.** Adapter list. WLAN profile + current SSID. `wifi_connect` to a saved profile (confirm).
+- **Settings / wallpaper / bin.** `settings_open` (`ms-settings:` or aliases). Wallpaper get/set (set needs confirm + allowroot file). Recycle count; `recycle_empty` (confirm).
+- **Packages.** `package` / `winget` search + list; install needs confirm.
+- **Files extras.** `files_hash` (SHA-256), `files_zip` / `files_unzip` (zip-slip safe), `files_touch`, `files_reveal`.
+- **Watch.** `watch_file` exists/gone/changed. `watch_proc` running/gone.
+- **Hands.** `right_click` and `double_click` use SendInput/coords — UIA invoke is left-click only. `menu` = right-click then item. `copy` / `paste` / `select_all`.
+- **Scripts.** Max steps 128 (was 64).
+
+## 2.3.0
+
+Owner mode. Full-Trust is unrestricted Exo policy plus a persistent elevated broker.
+
+- **Full-Trust lifts every Exo hard-deny** (HKLM / HKCR / HKU, Program Files / Windows writes, anti-cheat kill, unnamed PID, critical services, wipe patterns, non-loopback CDP). Default and trusted stay as they were.
+- **Elevated broker.** MCP stays medium IL (UIPI — clicks keep working). Privileged ops retry through a loopback helper running as admin. First use may show **one** UAC; after that the `ExoControl\\ElevatedBroker` logon task starts it without a prompt.
+- **CLI / ops.** `exo-control elevate status|install|start`; steps `elevate_status`, `elevate_install`, `registry_delete`, `run_elevated`.
+- **Still sacred.** `~/.exo/KILL` / `EXO_KILL_SWITCH=1` cannot be disarmed by the agent or the broker. Set `EXO_DISABLE_ELEVATE=1` to skip the broker (tests).
+- **Trust levels / session / web (local 2.2 work).** `default` / `trusted` / `full`. `web_task`. Browser back/forward/tabs/extract/select. `window_move` / `resize` / `snap`. `files_mkdir` / `stat` / `exists` / `search`. `os_info` / `drives` / `which` / `proc_info`. `remember` / `recall` / `plan` / `recover`.
+
+
+- **Trust levels.** `default` (safe) / `trusted` / `full`. Full-Trust requires `EXO_TRUST=full` (or `EXO_FULL_TRUST=1`) **and** `exo-control trust enable --ack "I own this PC"`. Audit log under `~/.exo/state/trust_audit.jsonl`.
+- **Full-Trust behavior.** Most confirms optional; user-profile file roots; longer lease TTL with auto-renew on hands. Hard denies kept: anti-cheat, unnamed PID, critical services, HKLM, Windows/Program Files writes, non-loopback CDP, wipe/shutdown patterns.
+- **Human kill-switch.** `~/.exo/KILL` or `exo-control trust kill` / `EXO_KILL_SWITCH=1`. Agents cannot disarm a kill file.
+- **`web_task`.** Multi-step browser job in one leased exec (structure/ref path). Optional extra `[web]` integrates Browser Use when an LLM key is set.
+- **Browser.** `browser_back` / `forward` / `tabs` / `extract` / `select`.
+- **Windows / files / OS.** `window_move` / `resize` / `snap`; `files_mkdir` / `stat` / `exists` / `search`; `os_info` / `drives` / `which` / `proc_info`.
+- **Session.** `remember` / `recall` / `plan` / `checkpoint` / `recover` persist under `~/.exo/state/sessions/`.
+
 ## 2.2.0
 
 Live seat, Pilot, stock Windows natives, and the desk-ops catalog.

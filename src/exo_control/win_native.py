@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from exo_control.http_json import clip_int, truncate
 
@@ -218,18 +218,290 @@ def tts(step: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "native": True, "spoke": True}
 
 
+_OCR_WIN_OK = None
+
+
+def ocr_win_available() -> bool:
+    """Cached probe: can we construct Windows.Media.Ocr.OcrEngine?"""
+    global _OCR_WIN_OK
+    if _OCR_WIN_OK is not None:
+        return bool(_OCR_WIN_OK)
+    if os.name != "nt":
+        _OCR_WIN_OK = False
+        return False
+    if _ocr_winrt_import():
+        _OCR_WIN_OK = True
+        return True
+    proc = powershell(
+        "Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null; "
+        "[void][Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]; "
+        "$e = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages(); "
+        "if ($e) { 'ok' } else { 'no' }",
+        timeout=12,
+    )
+    _OCR_WIN_OK = (proc.returncode == 0) and ("ok" in (proc.stdout or ""))
+    return bool(_OCR_WIN_OK)
+
+
+def _ocr_winrt_import():
+    try:
+        from winrt.windows.media.ocr import OcrEngine  # type: ignore
+        return OcrEngine
+    except Exception:
+        pass
+    try:
+        from winsdk.windows.media.ocr import OcrEngine  # type: ignore
+        return OcrEngine
+    except Exception:
+        return None
+
+
+def _items_from_text(text: str) -> List[Dict[str, Any]]:
+    text = (text or "").strip()
+    return [{"text": text}] if text else []
+
+
+def _normalize_ocr_items(raw: Any) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return items
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        text = str(it.get("text") or "").strip()
+        if not text:
+            continue
+        bbox = it.get("bbox")
+        if not (isinstance(bbox, list) and len(bbox) == 4):
+            x, y = it.get("x"), it.get("y")
+            w, h = it.get("w") or it.get("width"), it.get("h") or it.get("height")
+            try:
+                if None not in (x, y, w, h):
+                    bbox = [int(x), int(y), int(x) + int(w), int(y) + int(h)]
+            except Exception:
+                bbox = None
+        row: Dict[str, Any] = {"text": text}
+        if bbox:
+            try:
+                row["bbox"] = [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])]
+            except Exception:
+                pass
+        if it.get("confidence") is not None:
+            try:
+                row["confidence"] = float(it["confidence"])
+            except Exception:
+                pass
+        items.append(row)
+    return items
+
+
+def _ocr_win_winrt(path: str) -> Optional[Dict[str, Any]]:
+    """In-process winrt / winsdk. None if the packages are missing."""
+    OcrEngine = _ocr_winrt_import()
+    if OcrEngine is None:
+        return None
+    try:
+        import asyncio
+
+        async def _run() -> Dict[str, Any]:
+            try:
+                from winrt.windows.storage import FileAccessMode, StorageFile  # type: ignore
+                from winrt.windows.graphics.imaging import BitmapDecoder  # type: ignore
+            except Exception:
+                from winsdk.windows.storage import FileAccessMode, StorageFile  # type: ignore
+                from winsdk.windows.graphics.imaging import BitmapDecoder  # type: ignore
+            create = getattr(OcrEngine, "try_create_from_user_profile_languages", None) or getattr(
+                OcrEngine, "TryCreateFromUserProfileLanguages", None
+            )
+            engine = create() if create else None
+            if engine is None:
+                return {"ok": False, "error": "Windows.Media.Ocr engine unavailable", "code": "UNAVAILABLE"}
+            get_file = getattr(StorageFile, "get_file_from_path_async", None) or getattr(
+                StorageFile, "GetFileFromPathAsync"
+            )
+            file = await get_file(path)
+            open_async = getattr(file, "open_async", None) or getattr(file, "OpenAsync")
+            read_mode = getattr(FileAccessMode, "READ", None)
+            if read_mode is None:
+                read_mode = getattr(FileAccessMode, "Read")
+            stream = await open_async(read_mode)
+            create_dec = getattr(BitmapDecoder, "create_async", None) or getattr(BitmapDecoder, "CreateAsync")
+            decoder = await create_dec(stream)
+            get_bmp = getattr(decoder, "get_software_bitmap_async", None) or getattr(
+                decoder, "GetSoftwareBitmapAsync"
+            )
+            bitmap = await get_bmp()
+            recognize = getattr(engine, "recognize_async", None) or getattr(engine, "RecognizeAsync")
+            result = await recognize(bitmap)
+            items: List[Dict[str, Any]] = []
+            lines = getattr(result, "lines", None) or getattr(result, "Lines", None) or []
+            for line in lines:
+                words = getattr(line, "words", None) or getattr(line, "Words", None) or []
+                for word in words:
+                    text = getattr(word, "text", None) or getattr(word, "Text", "")
+                    rect = getattr(word, "bounding_rect", None) or getattr(word, "BoundingRect", None)
+                    row: Dict[str, Any] = {"text": str(text)}
+                    if rect is not None:
+                        x = float(getattr(rect, "x", None) or getattr(rect, "X", 0))
+                        y = float(getattr(rect, "y", None) or getattr(rect, "Y", 0))
+                        w = float(getattr(rect, "width", None) or getattr(rect, "Width", 0))
+                        h = float(getattr(rect, "height", None) or getattr(rect, "Height", 0))
+                        row["bbox"] = [int(x), int(y), int(x + w), int(y + h)]
+                    items.append(row)
+            text = str(getattr(result, "text", None) or getattr(result, "Text", "") or "").strip()
+            return {
+                "ok": True,
+                "native": True,
+                "engine": "winrt",
+                "text": text,
+                "items": items or _items_from_text(text),
+            }
+
+        try:
+            out = asyncio.run(_run())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                out = loop.run_until_complete(_run())
+            finally:
+                loop.close()
+        return out
+    except Exception as exc:
+        return {"ok": False, "error": truncate(str(exc), 300), "code": "UNAVAILABLE"}
+
+
+_PS_OCR_SCRIPT = r"""
+param([Parameter(Mandatory=$true)][string]$ImagePath)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
+[void][Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
+[void][Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime]
+[void][Windows.Graphics.Imaging.BitmapDecoder,Windows.Graphics.Imaging,ContentType=WindowsRuntime]
+$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+  $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+} | Select-Object -First 1
+if (-not $asTask) { Write-Output 'ENGINE_UNAVAILABLE'; exit 2 }
+function Await($WinRtTask, $ResultType) {
+  $m = $asTask.MakeGenericMethod($ResultType)
+  $net = $m.Invoke($null, @($WinRtTask))
+  $net.Wait(-1) | Out-Null
+  $net.Result
+}
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if (-not $engine) { Write-Output 'ENGINE_UNAVAILABLE'; exit 2 }
+$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($ImagePath)) ([Windows.Storage.StorageFile])
+$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$items = New-Object System.Collections.Generic.List[object]
+foreach ($line in $result.Lines) {
+  foreach ($word in $line.Words) {
+    $r = $word.BoundingRect
+    $items.Add([pscustomobject]@{
+      text = [string]$word.Text
+      x = [int][math]::Round([double]$r.X)
+      y = [int][math]::Round([double]$r.Y)
+      w = [int][math]::Round([double]$r.Width)
+      h = [int][math]::Round([double]$r.Height)
+    }) | Out-Null
+  }
+}
+$payload = [pscustomobject]@{ text = [string]$result.Text; items = @($items) }
+Write-Output ('OCR_JSON:' + ($payload | ConvertTo-Json -Compress -Depth 6))
+"""
+
+
+def _ocr_win_ps(path: str) -> Dict[str, Any]:
+    """Stock Windows.Media.Ocr via PowerShell / WinRT (no extra pip)."""
+    import json
+    import tempfile
+
+    script_path = None
+    try:
+        fd, script_path = tempfile.mkstemp(prefix="exo_ocr_", suffix=".ps1")
+        os.close(fd)
+        Path(script_path).write_text(_PS_OCR_SCRIPT.lstrip("\n"), encoding="utf-8")
+        proc = run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                script_path,
+                "-ImagePath",
+                path,
+            ],
+            timeout=30,
+        )
+    finally:
+        if script_path:
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
+    stdout = proc.stdout or ""
+    if "ENGINE_UNAVAILABLE" in stdout:
+        return {"ok": False, "error": "Windows.Media.Ocr engine unavailable", "code": "UNAVAILABLE"}
+    if proc.returncode != 0:
+        err = truncate((proc.stderr or stdout or "ocr_win failed").strip(), 300)
+        return {"ok": False, "error": err, "code": "UNAVAILABLE"}
+    marker = "OCR_JSON:"
+    idx = stdout.rfind(marker)
+    if idx < 0:
+        text = stdout.strip()
+        return {"ok": True, "native": True, "engine": "winrt", "text": text, "items": _items_from_text(text)}
+    raw = stdout[idx + len(marker) :].strip()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "ocr_win produced unreadable JSON", "code": "UNAVAILABLE"}
+    if isinstance(parsed, list):
+        # ConvertTo-Json of a single-property object can flatten oddly; accept a list of items.
+        items = _normalize_ocr_items(parsed)
+        text = " ".join(i.get("text", "") for i in items).strip()
+        return {"ok": True, "native": True, "engine": "winrt", "text": text, "items": items}
+    text = str(parsed.get("text") or "").strip()
+    items = _normalize_ocr_items(parsed.get("items"))
+    return {
+        "ok": True,
+        "native": True,
+        "engine": "winrt",
+        "text": text,
+        "items": items or _items_from_text(text),
+    }
+
+
 def ocr_win(step: Dict[str, Any]) -> Dict[str, Any]:
-    """Stub like stt. WinRT Recognize is not a reliable ok:true this release."""
+    """Windows.Media.Ocr on a file path. Honest fail if the bind or file is missing."""
+    global _OCR_WIN_OK
     path = str(step.get("path") or step.get("image") or "").strip()
     if not path:
         return {"ok": False, "error": "ocr_win requires path", "code": "MISSING_PATH"}
-    return {
-        "ok": False,
-        "error": "ocr_win has no stock WinRT bind we will pretend works",
-        "code": "UNAVAILABLE",
-        "hint": "Use omni or files_convert; do not invent OCR text",
-    }
-
+    fp = Path(path)
+    if not fp.is_file():
+        return {"ok": False, "error": f"ocr_win file not found: {path}", "code": "MISSING_PATH"}
+    if os.name != "nt":
+        return {"ok": False, "error": "ocr_win is Windows-only", "code": "WINDOWS_ONLY"}
+    resolved = str(fp.resolve())
+    try:
+        winrt_out = _ocr_win_winrt(resolved)
+        if winrt_out is not None:
+            if winrt_out.get("ok"):
+                _OCR_WIN_OK = True
+            elif winrt_out.get("code") == "UNAVAILABLE":
+                _OCR_WIN_OK = False
+            return winrt_out
+        out = _ocr_win_ps(resolved)
+        if out.get("ok"):
+            _OCR_WIN_OK = True
+        elif out.get("code") == "UNAVAILABLE":
+            _OCR_WIN_OK = False
+        return out
+    except Exception as exc:
+        return {"ok": False, "error": truncate(str(exc), 300), "code": "UNAVAILABLE"}
 
 def stt(step: Dict[str, Any]) -> Dict[str, Any]:
     return {
@@ -369,7 +641,7 @@ def winsearch(step: Dict[str, Any]) -> Dict[str, Any]:
             continue
         name, full = line.split("|", 1)
         hits.append({"name": name.strip(), "path": full.strip()})
-    return {"ok": True, "native": True, "hits": hits, "count": len(hits), "provider": "walk"}
+    return {"ok": True, "native": True, "hits": hits, "count": len(hits), "provider": "walk", "note": "home-folder walk, not Windows Search"}
 
 
 def lock_pc(step: Dict[str, Any]) -> Dict[str, Any]:
@@ -539,5 +811,5 @@ WINDOWS_NATIVE_OPS = (
     "volume", "recycle", "tts", "wifi", "power", "print", "dialog",
     "lnk", "certs", "winsearch", "lock_pc", "idle", "brightness", "dark_mode",
     "ports", "uptime", "usb", "bluetooth", "printers", "bitlocker", "defender",
-    "win_updates", "fonts", "winget", "eventlog",
+    "win_updates", "fonts", "winget", "eventlog", "ocr_win",
 )

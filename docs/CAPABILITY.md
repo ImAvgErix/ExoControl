@@ -13,10 +13,11 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 
 ## P0 — Token & efficiency (first-class)
 
+- [x] Default observe is fused eyes (a11y + OpenCV grounding + OCR when available), bound to the focused window
 - [x] **Compact-by-default eyes:** default `observe`/`compact_observe`/`eyes`/`browser_snapshot` responses stay under a hard cap (≤4KB chars or ≤40 refs) unless `verbose=true`; raw HTML/a11y full trees never dump by default
 - [x] **No screenshot-default:** structure/DOM path succeeds without screenshot for Exo Settings→Library and one desktop Notepad type; screenshot only on explicit ask or structure miss
 - [x] **Batched exec:** a 6+ step workflow runs in **one** `exo_exec` (one MCP round-trip); mid-script state (lease, CDP, focus) sticks
-- [x] **Ref-stable acts:** click/type/fill accept compact refs from the prior observe/snapshot in the same script
+- [x] **Ref-stable acts:** click/type/fill accept compact refs from the prior observe/snapshot; session hits survive the next exec until session_close
 - [x] **Budget gate:** Exo `compact_observe` p95 < 300ms and p95 payload < cap over warm calls
 
 ## P0 — Desktop / UIA hands
@@ -40,12 +41,12 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 ## P0 — Registry
 
 - [x] Read HKCU (and allowed HKLM read) by path; missing key → ok:false
-- [x] Write HKCU only with `confirm=true`; HKLM write denied
+- [x] Write HKCU only with `confirm=true`; HKLM write denied in default/trusted; Full-Trust + broker writes HKLM
 - [x] Results compact: name/type/value only
 
 ## P0 — OS infrastructure
 
-- [x] Process inventory compact; kill requires `confirm=true` + lease; protected/anti-cheat names hard-deny
+- [x] Process inventory compact; kill requires `confirm=true` + lease; protected/anti-cheat names hard-deny in default/trusted
 - [x] Service list + status; start/stop/restart require `confirm=true`
 - [x] env / scheduled tasks / startup list behind explicit ops; mutating ones need confirm
 - [x] Crash honesty: target app kill mid-script fails ≤15s, lease recoverable
@@ -72,22 +73,43 @@ Product: **Exo Control** · Repo: [ImAvgErix/ExoControl](https://github.com/ImAv
 - [x] Graph Wave 1: `todo` / `onenote` / `teams` / `mail_send` / `xlsx` (CSV or workbook)
 - [x] Jina via `scrape` `provider=jina`; allowrooted `git`; GitHub `gh_pr`
 - [x] Windows desk: `volume` / `winget` / `recycle` / `eventlog` / `tts`
-- [ ] `stt` and `ocr_win` are stubs (see `ready`)
+- [x] Default `observe` is fused eyes (a11y + window-local OpenCV + OCR when available); session hit cache survives the next exec; `ocr_win` is Windows.Media.Ocr (not a stub). `stt` stays a stub
 - [x] `window_move` (lease); `browser_network` / `browser_downloads` / `browser_pdf` / `browser_tabs`
 - [x] Wave 2: `rag` / `winsearch` / `steel_start` / `search` providers / `slack` / `notion` / `linear`
 - [x] Wave 2 shells/sys: `pwsh` / `wsl` / `docker` / `print` / `wifi` / `power` / `disk` / `whoami` / `certs` / `hash` / `lnk` / `dialog`
 - [x] Waves 3–5: Graph writes, CDP extras, open-data search, more SaaS, zip/sqlite/tree, sys status (no secret dump / UAC / anti-cheat)
 - [x] Pilot (original): `goal` / `checkpoint` / `proof` / `changed` / `undo` / `skill_save` / `skill_run` / `heal`
 - [x] Stock Windows natives (ctypes/netsh/PowerShell/COM) for volume, lock, wifi, power, recycle, TTS, dialog, dark_mode, idle, ports, Defender status, …
-- [x] Honest `ready` map: what works here vs Windows-native vs needs a key (`stt` and `ocr_win` stay stub)
+- [x] Honest `ready` map: what works here vs Windows-native vs needs a key (`stt` stays stub; `ocr_win` is WinRT)
 - [x] Live seat: `session_open` holds the desk like remote access; `pointer` / `mouse` / `keypress` / `drive` are raw HID (not UIA, not RDP)
+
+## P2 — Full-PC computer use (2.2)
+
+- [x] Trust levels: default / trusted / Full-Trust (env + first-time ack + audit). Kill file `~/.exo/KILL` always wins
+- [x] Full-Trust owner mode: no Exo policy denials; elevated broker for HKLM / Program Files / services (MCP stays medium IL). Kill file still wins.
+- [x] `web_task` — multi-step browser job in one leased exec (structure/ref path). Optional extra `[web]` (Browser Use) when an LLM key is present
+- [x] Browser extras: `browser_back` / `forward` / `tabs` / `extract` / `select`
+- [x] Window move / resize / snap; files mkdir/stat/exists/search; `os_info` / `drives` / `which` / `proc_info`
+- [x] Persistent session: remember/recall, plan, checkpoint, recover last focus
+
+## P3 — The rest of the PC (2.4)
+
+- [x] `find` returns refs from last read/observe (or a fresh read)
+- [x] `pc` snapshot: audio / power / idle / network / wifi / recycle / clock
+- [x] Volume + mute (default render device). Brightness honest on desktop. Lock / sleep (confirm)
+- [x] WLAN profiles + connect (confirm). `ms-settings:` open. Wallpaper get/set. Recycle count/empty
+- [x] winget search/list/install (install confirm). File hash/zip/unzip/touch/reveal
+- [x] `watch_file` / `watch_proc`. Right-click and double-click do not go through UIA invoke
+- [x] `menu`, `copy` / `paste` / `select_all`. Script cap 128 steps
 
 ## Hard stops
 
-- Anti-cheat / kernel tampering / credential dumping / silent elevation
+- Default/trusted: anti-cheat / unnamed PID / HKLM / System32 / critical services
 - Default-on screenshots, raw HTML dumps, unbounded observe trees
-- Registry or service mutation without confirm
-- Claiming “full OS control” while files/registry/services are stubs
+- Registry or service mutation without confirm (unless Full-Trust)
+- Activating Full-Trust from env alone (ack file required) or from ack alone (env required)
+- Agent or broker disarming `~/.exo/KILL`
+- Elevating the MCP process itself (UIPI)
 
 ## Install (library — no installer EXE)
 

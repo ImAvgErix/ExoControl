@@ -82,18 +82,32 @@ def test_ready_is_honest_and_lease_free():
 
 
 def test_ready_is_honest():
+    from exo_control.win_native import ocr_win_available
+
     body = _result({"op": "ready"})
     assert "stt" in body["stub"]
-    assert "ocr_win" in body["stub"]
-    assert "ocr_win" not in body["windows_native"]
+    winocr = bool(ocr_win_available())
+    if winocr:
+        assert "ocr_win" not in body["stub"]
+        assert "ocr_win" in body["windows_native"]
+    else:
+        assert "ocr_win" in body["stub"]
+        assert "ocr_win" not in body["windows_native"]
+
+    caps = _result({"op": "status"})["capabilities"]
+    assert caps["stt"] is False
+    assert caps["ocr_win"] is winocr
+    assert caps.get("winsearch_is_walk") is True
 
 
-def test_ocr_win_stub_fail_closed():
+def test_ocr_win_missing_path_fail_closed():
     from exo_control.win_native import ocr_win
 
+    out = ocr_win({})
+    assert out["ok"] is False
+    assert out.get("code") == "MISSING_PATH"
     out = ocr_win({"path": "x.png"})
     assert out["ok"] is False
-    assert out.get("code") == "UNAVAILABLE"
     assert not out.get("text")
 
 

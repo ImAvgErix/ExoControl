@@ -96,7 +96,7 @@ class SafetyStub:
         self.injects += 1
         return ActionOutcome(True, True, f"hotkey {keys}", backend="stub")
 
-    def smart_click(self, query=None, x=None, y=None, button="left", require_change=False):
+    def smart_click(self, query=None, x=None, y=None, button="left", require_change=False, **kwargs):
         self.injects += 1
         return ActionOutcome(True, True, f"click {query}", backend="stub")
 

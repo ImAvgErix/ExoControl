@@ -85,21 +85,52 @@ class PerceptionEngine:
         self._last_hash: Optional[str] = None
         self._ocr_reader = None
         self._ocr_init_attempted = False
+        self._ocr_backend_used = None
         self._obs_cache = None
         self._obs_cache_time = 0.0
         self._obs_cache_ttl = 0.35  # seconds — continuous perception reuse
         # Do NOT construct easyocr.Reader here — it pulls torch and can take
         # seconds + spam deprecation warnings on every CLI/MCP cold start.
 
+    def ocr_status(self) -> str:
+        """Honest backend name: winrt | tesseract | easyocr | unavailable.
+
+        Does not spawn PowerShell or construct easyocr.Reader on cold start.
+        """
+        if not self.use_ocr:
+            return "unavailable"
+        used = getattr(self, "_ocr_backend_used", None)
+        if used:
+            return used
+        eng = (self.ocr_engine or "auto").lower()
+        if eng in ("auto", "winrt", "ocr_win"):
+            try:
+                from .win_native import _OCR_WIN_OK, _ocr_winrt_import
+                if _ocr_winrt_import() or _OCR_WIN_OK is True:
+                    return "winrt"
+            except Exception:
+                pass
+        if eng in ("auto", "tesseract") and _probe_tesseract():
+            return "tesseract"
+        if eng in ("auto", "easyocr") and _probe_easyocr():
+            return "easyocr"
+        return "unavailable"
+
     def ocr_available(self) -> bool:
-        """Whether an OCR backend can be used without claiming it is loaded."""
+        """Whether an OCR backend can be used. WinRT-via-PS is optimistic until first fail."""
         if not self.use_ocr:
             return False
+        if self.ocr_status() != "unavailable":
+            return True
         eng = (self.ocr_engine or "auto").lower()
-        if eng in ("auto", "easyocr") and _probe_easyocr():
-            return True
-        if eng in ("auto", "tesseract") and _probe_tesseract():
-            return True
+        if eng in ("auto", "winrt", "ocr_win"):
+            try:
+                import os
+                from .win_native import _OCR_WIN_OK
+                if os.name == "nt" and _OCR_WIN_OK is not False:
+                    return True
+            except Exception:
+                pass
         return False
 
     def _ensure_ocr_reader(self) -> None:
@@ -189,29 +220,61 @@ class PerceptionEngine:
         except Exception:
             return img
 
+    def _run_ocr_win(self, img: Image.Image) -> Optional[List[Dict]]:
+        """WinRT OCR. None if backend missing; list (maybe empty) if it ran."""
+        import os
+        import tempfile
+
+        from .win_native import ocr_win
+
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(prefix="exo_ocr_", suffix=".png")
+            os.close(fd)
+            img.save(tmp, format="PNG")
+            out = ocr_win({"path": tmp})
+        except Exception:
+            return None
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        if not isinstance(out, dict):
+            return None
+        if out.get("ok"):
+            items: List[Dict] = []
+            for it in out.get("items") or []:
+                if not isinstance(it, dict) or not it.get("text"):
+                    continue
+                row = {
+                    "text": it["text"],
+                    "confidence": float(it.get("confidence") or 0.85),
+                }
+                if it.get("bbox"):
+                    row["bbox"] = it["bbox"]
+                items.append(row)
+            if not items and out.get("text"):
+                items.append({"text": out["text"], "confidence": 0.85})
+            return items
+        return None
+
     def _run_ocr(self, img: Image.Image) -> List[Dict]:
-        results = []
+        results: List[Dict] = []
         try:
             img = self._preprocess_for_ocr(img)
         except Exception:
             pass
-        self._ensure_ocr_reader()
-        if self._ocr_reader is not None:
-            try:
-                ocr_out = self._ocr_reader.readtext(np.array(img))
-                for (bbox, text, conf) in ocr_out:
-                    if conf < 0.3:
-                        continue
-                    xs = [p[0] for p in bbox]
-                    ys = [p[1] for p in bbox]
-                    results.append({
-                        "text": text,
-                        "bbox": [int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))],
-                        "confidence": float(conf),
-                    })
-            except Exception:
-                pass
-        elif _probe_tesseract():
+        eng = (self.ocr_engine or "auto").lower()
+        if eng in ("auto", "winrt", "ocr_win"):
+            win = self._run_ocr_win(img)
+            if win is not None:
+                self._ocr_backend_used = "winrt"
+                return win
+            if eng in ("winrt", "ocr_win"):
+                return []
+        if eng in ("auto", "tesseract") and _probe_tesseract():
             try:
                 import pytesseract
                 data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
@@ -226,8 +289,28 @@ class PerceptionEngine:
                         "bbox": [x, y, x + w, y + h],
                         "confidence": conf / 100.0,
                     })
+                self._ocr_backend_used = "tesseract"
+                return results
             except Exception:
-                pass
+                results = []
+        if eng in ("auto", "easyocr"):
+            self._ensure_ocr_reader()
+            if self._ocr_reader is not None:
+                try:
+                    ocr_out = self._ocr_reader.readtext(np.array(img))
+                    for (bbox, text, conf) in ocr_out:
+                        if conf < 0.3:
+                            continue
+                        xs = [p[0] for p in bbox]
+                        ys = [p[1] for p in bbox]
+                        results.append({
+                            "text": text,
+                            "bbox": [int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))],
+                            "confidence": float(conf),
+                        })
+                    self._ocr_backend_used = "easyocr"
+                except Exception:
+                    pass
         return results
 
     def _compute_diff(self, img: Image.Image) -> Dict[str, Any]:

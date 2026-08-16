@@ -47,6 +47,8 @@ def test_notepad_type_read_close():
             pytest.skip(f"notepad launch failed: {launch.get('result')}")
         if _want_live() != "1" and "desktop" in str(err).lower():
             pytest.skip(f"no interactive desktop: {err}")
+        if _want_live() != "1" and "lease" in str(err).lower():
+            pytest.skip(f"desktop lease busy: {err}")
     assert out["ok"] is True, out.get("last_error") or out
     read = next(s for s in out["steps"] if s["op"] == "read")
     blob = str(read["result"])
@@ -86,6 +88,8 @@ def test_notepad_aimed_wheel():
             pytest.skip(f"notepad launch failed: {launch.get('result')}")
         if _want_live() != "1" and "desktop" in str(err).lower():
             pytest.skip(f"no interactive desktop: {err}")
+        if _want_live() != "1" and "lease" in str(err).lower():
+            pytest.skip(f"desktop lease busy: {err}")
     assert out["ok"] is True, out.get("last_error") or out
     wheels = [s for s in out["steps"] if s["op"] == "scroll"]
     assert wheels and all(s["ok"] for s in wheels)
